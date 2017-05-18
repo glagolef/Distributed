@@ -29,6 +29,7 @@ import           Crypto.Simple.CBC            (encrypt, decrypt)
 import           Control.Concurrent
 import           Data.Typeable
 import           Data.Char
+
 sessDB  = "SESSIONS"   :: Text
 sessID  = "sessID"     :: Text
 
@@ -36,14 +37,15 @@ type DirectoryAPI = "getDir" :> ReqBody '[JSON] EncrMessage :> Get '[JSON] EncrD
                :<|> "addDir" :> ReqBody '[JSON] EncrDirMessage :> Put '[JSON] EncrMessage
                :<|> "delDir" :> ReqBody '[JSON] EncrMessage :> Delete '[JSON] EncrMessage
 
-type FileServerAPI = "download" :> ModifiedHeader :> ReqBody '[JSON] File :> Get '[JSON] Message
-                :<|> "upload"   :> ReqBody '[JSON] File :> Put '[JSON] NoContent
-                :<|> "delete"   :> ReqBody '[JSON] Message :> Delete '[JSON] NoContent
+type FileServerAPI = "download" :> ModifiedHeader :> ReqBody '[JSON] EncrFile :> Get '[JSON] EncrMessage
+                :<|> "upload"   :> ReqBody '[JSON] EncrFile :> Put '[JSON] EncrMessage
+                :<|> "delete"   :> ReqBody '[JSON] EncrMessage :> Delete '[JSON] EncrMessage
 
 type SecurityAPI = "login"     :> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
               :<|> "get-ticket":> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
               :<|> "register"  :> ReqBody '[JSON] AuthRequest :> Put '[JSON] Message
               :<|> "delete"    :> ReqBody '[JSON] Message :> Delete '[JSON] Message
+              
 type ModifiedHeader = Header "If-Modified-Since:" UTCTime
 
 type Key  = String
@@ -105,15 +107,28 @@ getMultipleFromDB key records  = do
 deleteFromDB :: Key -> Text -> IO ()
 deleteFromDB record db = withMongoDbConnection $ delete (select ["key" =:  record] db)
 
-enc::(Show b) => Pass -> b -> IO String
-enc passw inp = do
-  e <- encrypt (C.pack passw) $ C.pack (show inp) 
-  return (C.unpack e)
+enc:: Pass -> Key -> IO String
+enc passw inp = C.unpack <$> encrypt (C.pack passw) (C.pack inp) >>= return 
 
 decr :: Pass -> String -> IO String
-decr passw inp = do
-  e <- decrypt (C.pack passw) $ C.pack inp
-  return (C.unpack e)
+decr passw inp = C.unpack <$> decrypt (C.pack passw) (C.pack inp) >>= return
+
+cryptFile:: File -> Pass -> (Pass -> String -> IO String)-> IO File
+cryptFile (File fp fc) pass funct = do
+  warnLog "Encrypting message..."
+  fpth <- funct pass (unpack fp)
+  fcon <- funct pass (unpack fc) 
+  return (File (pack fpth) (pack fcon))
+
+encryptMessage:: Message -> Pass -> IO Message
+encryptMessage (Message msg) pass = do
+  warnLog "Encrypting message..."
+  pack <$> (enc (unpack msg) pass) >>= return . Message
+
+decryptMessage:: Message -> Pass -> IO String
+decryptMessage (Message msg) pass = do
+  warnLog "Encrypting message..."
+  (decr (unpack msg) pass) >>= return 
 
 getSessionKey :: Pass -> String -> IO (Maybe Pass)
 getSessionKey passw inp = do

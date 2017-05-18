@@ -47,7 +47,7 @@ encrypToken :: Ticket -> Pass -> Key -> Int -> Pass -> IO Token
 encrypToken ticket session server timeout pass  = do
   sess <- liftIO $ enc pass session
   serv <- liftIO $ enc pass server 
-  to   <- liftIO $ enc pass timeout
+  to   <- liftIO $ enc pass (show timeout)
   return $ Token ticket sess serv to
 
 decrypToken:: Token -> Pass -> IO Token
@@ -55,7 +55,7 @@ decrypToken (Token ticket session server timeout) pass = do
   sess <- liftIO $ decr pass session
   serv <- liftIO $ decr pass server 
   to   <- liftIO $ decr pass timeout
-  return $ Token ticket sess serv to
+  return $ Token ticket sess serv (read to :: Int)
 
 getNewSession:: IO String
 getNewSession = do

@@ -14,8 +14,6 @@ import           Data.Aeson.TH
 import           Data.Bson
 import           Data.Bson.Generic
 import qualified Data.List                    as DL 
-import           Data.Maybe                   (catMaybes)
-import           Database.MongoDB
 import           GHC.Generics
 import           Network.HTTP.Client          (defaultManagerSettings,
                                                newManager)
@@ -52,7 +50,7 @@ server = sendDir:<|> addDir :<|> delDir
             Nothing   -> throwError custom403Err
             Just rec -> do
              liftIO $ warnLog "Found Records. Encrypting response..."
-             response <- liftIO $ encryptDirMessage rec sess
+             response <- liftIO $ cryptDirMessage rec sess (enc)
              liftIO $ warnLog "Done."
              return (response, ticket)
 
@@ -62,7 +60,7 @@ server = sendDir:<|> addDir :<|> delDir
         case session of
           Nothing   -> throwError custom403Err
           Just sess -> do
-            decryptDirMsg <- liftIO $ decryptDirMessage msg sess
+            decryptDirMsg <- liftIO $ cryptDirMessage msg sess (decr)
             liftIO $ print decryptDirMsg
             liftIO $ insertToDB (fileID decryptDirMsg) decryptDirMsg dirDB
             response <- liftIO $ encryptMessage (Message "Great Addition.") sess
@@ -95,31 +93,13 @@ api = Proxy
 dirKey = "dir_password"  :: Pass
 dirDB = "FILE_TO_SERVER" :: Text
 
-encryptMessage:: Message -> Pass -> IO Message
-encryptMessage (Message msg) pass = do
-  warnLog "Encrypting message..."
-  pack <$> (decr (unpack msg) pass) >>= return . Message
-
-decryptMessage:: Message -> Pass -> IO String
-decryptMessage (Message msg) pass = do
-  warnLog "Encrypting message..."
-  (decr (unpack msg) pass) >>= return 
-
-
-decryptDirMessage:: DirMessage -> Pass -> IO DirMessage
-decryptDirMessage (DirMessage fileID sIP sPort sPath) pass = do
-  warnLog "Decrypting message..."
-  fid <- decr pass fileID
-  sip <- decr pass sIP 
-  spo <- decr pass sPort
-  spa <- decr pass sPath
+cryptDirMessage:: DirMessage -> Pass -> (Pass -> String -> IO String)-> IO DirMessage
+cryptDirMessage (DirMessage fileID sIP sPort sPath) pass (funct) = do
+  fid <- funct pass fileID
+  sip <- funct pass sIP 
+  spo <- funct pass sPort
+  spa <- funct pass sPath
   return (DirMessage fid sip spo spa)
 
-encryptDirMessage:: DirMessage -> Pass -> IO DirMessage
-encryptDirMessage (DirMessage fileID sIP sPort sPath) pass = do
-  warnLog "Decrypting message..."
-  fid <- enc pass fileID
-  sip <-  enc pass sIP 
-  spo <- enc pass sPort
-  spa <-  enc pass sPath
-  return (DirMessage fid sip spo spa)
+
+
