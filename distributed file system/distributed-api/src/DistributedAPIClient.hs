@@ -22,30 +22,25 @@ api = Proxy
 
 (download :<|> upload :<|> remove) = client api
 
-getDir :: Message -> ClientM [DirMessage]
-addDir :: DirMessage -> ClientM NoContent
-delDir :: Message -> ClientM NoContent
+-- getDir :: EncrMessage -> ClientM EncrDirMessage
+-- addDir :: EncrDirMessage -> ClientM EncrMessage
+-- delDir :: EncrMessage -> ClientM EncrMessage
 
-dirApi :: Proxy DirAPI
-dirApi = Proxy
+-- dirApi :: Proxy DirectoryAPI
+-- dirApi = Proxy
 
-getDir :<|> addDir :<|> delDir = client dirApi
+-- getDir :<|> addDir :<|> delDir = client dirApi
 
-type SecurityAPI = "login"     :> ReqBody '[JSON] Login :> Get '[JSON] Token
-              :<|> "get-ticket":> ReqBody '[JSON] File :> Get '[JSON] Token
-              :<|> "register"  :> ReqBody '[JSON] Login :> Put '[JSON] Message
-              :<|> "delete"    :> ReqBody '[JSON] Message :> Delete '[JSON] Message
-
-login :: Login -> ClientM Token
-register :: Login -> ClientM Login
-getTicket :: File -> ClientM Message
-deleteUser :: ClientM Message
+login :: AuthRequest -> ClientM Token
+getTicket :: AuthRequest -> ClientM Token
+registerUser :: AuthRequest -> ClientM Message
+deleteUser :: Message -> ClientM Message
 
 authApi:: Proxy SecurityAPI
 authApi = Proxy
 
 
-login :<|> getTicket :<|> register :<|> deleteUser  = client authApi
+login :<|> getTicket :<|> registerUser :<|> deleteUser  = client authApi
 
 
 -- getDir = client dirApi

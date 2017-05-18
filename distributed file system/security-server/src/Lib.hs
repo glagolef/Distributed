@@ -1,13 +1,5 @@
-{-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE DeriveAnyClass       #-}
-{-# LANGUAGE DeriveGeneric        #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE OverloadedStrings    #-}
-{-# LANGUAGE StandaloneDeriving   #-}
-{-# LANGUAGE TemplateHaskell      #-}
-{-# LANGUAGE TypeOperators        #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE DataKinds,DeriveAnyClass,DeriveGeneric,FlexibleContexts,FlexibleInstances,OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving,TemplateHaskell,TypeOperators,TypeSynonymInstances,ScopedTypeVariables #-}
 module Lib
     ( startApp
     , app
@@ -17,12 +9,14 @@ import           Control.Concurrent           (forkIO)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except   (ExceptT)
 import           Control.Monad.Trans.Resource
-import           Data.Aeson  hiding (Value)
+import           Data.Aeson                   hiding (Value)
 import           Data.Aeson.TH
 import           Data.Bson
 import           Data.Bson.Generic
+import           DistributedAPI
+import           Data.Text.Encoding
+import qualified Data.ByteString.Char8        as C
 import qualified Data.List                    as DL   
-import           Data.Maybe                   (catMaybes)
 import           Database.MongoDB
 import           GHC.Generics
 import           Network.HTTP.Client          (defaultManagerSettings,
@@ -31,9 +25,9 @@ import           Network.Wai
 import           Network.Wai.Handler.Warp
 import           Network.Wai.Logger
 import           Servant
-import qualified Servant.API                  as SC
-import qualified Servant.Server               as SC
-import           Data.Text                    
+import           Servant.API                 
+import           Servant.Server              
+import           Data.Text          hiding (find)          
 import           System.Directory             
 import           System.Environment           (getArgs, getProgName, lookupEnv)
 import           System.Log.Formatter
@@ -41,120 +35,104 @@ import           System.Log.Handler           (setFormatter)
 import           System.Log.Handler.Simple
 import           System.Log.Handler.Syslog
 import           System.Log.Logger
-import           DistributedAPI
-import           Data.Text.Encoding
-import qualified Data.ByteString             as B
 import           System.Entropy
-import qualified Data.ByteString.Char8       as C
-import           Crypto.Simple.CBC (encrypt, decrypt) 
 import           Control.Concurrent
 
 
 
-encryptTicket :: Key -> C.ByteString -> Int -> IO C.ByteString
-encryptTicket key sess timeout = encrypt (C.pack key) $ C.pack $ (C.unpack sess) ++ "\nTicket Valid For:" ++ (show timeout)
+encryptTicket :: Pass -> Pass -> Int -> IO Ticket
+encryptTicket serv_key sess timeout = enc serv_key $ sess ++ "\nTicket Valid For:" ++ (show timeout)
 
-getSessionKey :: Key -> String -> IO (Maybe String)
-getSessionKey passw inp = do
-  answ <- decr passw inp
-  case (DL.isInfixOf "Ticket Valid For:" answ) of
-    False -> return Nothing
-    True  -> do
-       let sess = DL.head $ DL.lines answ
-       isValid <- isValidSess sess
-       case isValid of
-        False -> return Nothing
-        True  -> return $ Just sess
-
-isValidSess:: Key -> IO Bool
-isValidSess key = do
-      withMongoDbConnection $ do
-        passw <- findOne (select ["sessID" =: key] "SESSIONS")
-        case passw of 
-          Nothing -> return False
-          Just r  -> return True
-
-
-encrypToken pass ticket session server timeout = do
-  t    <- liftIO $ enc pass ticket
+encrypToken :: Ticket -> Pass -> Key -> Int -> Pass -> IO Token
+encrypToken ticket session server timeout pass  = do
   sess <- liftIO $ enc pass session
   serv <- liftIO $ enc pass server 
   to   <- liftIO $ enc pass timeout
-  return Token { ticket = t
-               , session_key = sess
-               , server_id = serv
-               , timeout = to
-               }
+  return $ Token ticket sess serv to
 
-getToken :: String -> String -> Handler Token
-getToken passw server = do
-  sess <- liftIO $ getEntropy 2048
-  key <- liftIO $ getKey server
-  case key of
+decrypToken:: Token -> Pass -> IO Token
+decrypToken (Token ticket session server timeout) pass = do
+  sess <- liftIO $ decr pass session
+  serv <- liftIO $ decr pass server 
+  to   <- liftIO $ decr pass timeout
+  return $ Token ticket sess serv to
+
+getNewSession:: IO String
+getNewSession = do
+  session <- liftIO $ C.unpack <$> getEntropy 2048
+  return session
+
+
+
+buildNewToken :: Pass -> Key -> Handler Token
+buildNewToken passw server = do
+  sess <- liftIO $ getNewSession
+  (server_key :: (Maybe Key)) <- liftIO $ getPassw server serversDB 
+  case server_key of
     Nothing -> throwError custom404Err
-    Just (c) -> do
+    (Just k) -> do
                 let timeout = 60*60
-                liftIO $ forkIO $ addSession (C.unpack sess) timeout
-                tick <- liftIO $ encryptTicket c sess timeout
-                liftIO $ encrypToken passw tick sess server timeout
+                liftIO $ forkIO $ addSession sess timeout
+                tick <- liftIO $ encryptTicket k sess timeout
+                liftIO $ (encrypToken tick sess server timeout passw) >>= return
 
 server :: Server SecurityAPI
-server = login
-    :<|> getTicket
-    :<|> register 
-    :<|> deleteUser 
-   where
- login :: Login -> Handler Token
- login msg =  do
-        let (login, message) = (unpack (fpath msg),(encodeUtf8 (fcontents msg)))
-        rec <- liftIO $ findUser login
+server = login :<|> getTicket:<|> registerUser :<|> deleteUser 
+
+login :: AuthRequest -> Handler Token
+login (File log mes) =  do
+        let (login, message) = mapTuple unpack (log,mes)
+        (rec :: Maybe Pass) <- liftIO $ getPassw login usersDB 
         liftIO $ print rec
         case rec of
           Just passw -> do
-            lg <- liftIO $ decrypt (C.pack passw) message
-            case (login == (C.unpack lg)) of
-              True  -> getToken "TGS" passw
+            valid <- liftIO $ decr passw message
+            case (login == valid) of
+              True  -> buildNewToken tgs_id passw 
               False -> throwError custom401Err
           Nothing -> throwError custom403Err
- getTicket :: File -> Handler Token
- getTicket msg =  do
-        let (ticket, encr_msg) = mapTuple unpack ((fpath msg),(fcontents msg))
+getTicket :: AuthRequest -> Handler Token
+getTicket (File log mes) =  do
+        let (ticket, encr_msg) = mapTuple unpack (log,mes)
         req <- liftIO $ getSessionKey tgsKey ticket
         case req of 
           Nothing   -> throwError custom401Err
           Just sess -> do
             server <- liftIO $ decr sess encr_msg
-            getToken sess server
- register :: Login -> Handler Message
- register msg = liftIO $ do
-      let (username, password) = mapTuple unpack ((fpath msg), (fcontents msg))
-      withMongoDbConnection $ upsert (select ["user" =: (username)] "USERS") $ toBSON password
-      return Message{content = "Success. You can now log in."}
- deleteUser :: Message -> Handler Message
- deleteUser msg = liftIO $ do
-  withMongoDbConnection $ delete (select ["user" =:  (unpack (content msg))] "USERS")
+            buildNewToken sess server
+
+registerUser :: AuthRequest -> Handler Message
+registerUser (File log mes) = liftIO $ do
+  let (username, password) = mapTuple unpack (log,mes)
+  insertToDB username (Login username password) usersDB
+  return Message{content = "Success. You can now log in."}
+
+deleteUser :: Message -> Handler Message
+deleteUser msg = liftIO $ do
+  deleteFromDB (unpack (content msg)) usersDB
   return Message {content = "Success. You have been deleted."}
 
-findUser :: String -> IO (Maybe String)
-findUser key = do
-      withMongoDbConnection $ do
-        passw <- findOne (select ["user" =: key] "USERS")
-        case passw of 
-          Nothing -> return Nothing
-          Just r  -> return $ (fromBSON r :: Maybe String)
-getKey :: String -> IO (Maybe Key)
-getKey server = do
-      withMongoDbConnection $ do
-        key <- findOne (select ["server" =: server] "SERVER_KEYS")
-        case key of 
-          Nothing -> return Nothing
-          Just r  -> return $ (fromBSON r :: Maybe (Key))
 
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
   warnLog "Starting security-server."
-  let settings = setPort 8080 $ setLogger aplogger defaultSettings
-  runSettings settings app
+  withMongoDbConnection $ delete (select [] serversDB)
+  insertServers serverLogins serversDB
+  answ <- getPassw tgs_id serversDB 
+  print answ
+  case answ of 
+    Just a -> do
+      warnLog "Done."
+      let settings = setPort 8080 $ setLogger aplogger defaultSettings
+      runSettings settings app
+    Nothing -> warnLog "Something went wrong." >> startApp
+               
+
+
+
+
+
+
 
 app :: Application
 app = serve api server
@@ -162,7 +140,12 @@ app = serve api server
 api :: Proxy SecurityAPI
 api = Proxy
 
+usersDB    = "USERS"    ::Text
+serversDB  = "test"     ::Text
+userID     = "user"     ::Text
+serverID   = "server"   ::Text
 
+tgs_id     = "TGS"      ::String
 
 tgsKey = "tgs_password" ::String
 fs1Key = "fs1_password" ::String
@@ -172,12 +155,14 @@ dirKey = "dir_password" ::String
 locKey = "loc_password" ::String
 trnKey = "trn_password" ::String
 
-insertServers :: Action IO [Value]
-insertServers = insertMany "FILE_TO_SERVER" [
-    ["server" =: ("TGS"::String), "key" =: tgsKey],
-    ["server" =: ("FS1"::String), "key" =: fs1Key],
-    ["server" =: ("FS2"::String), "key" =: fs2Key],
-    ["server" =: ("FS3"::String), "key" =: fs3Key],
-    ["server" =: ("Dir"::String), "key" =: dirKey],
-    ["server" =: ("Loc"::String), "key" =: locKey],
-    ["server" =: ("Trn"::String), "key" =: trnKey]]
+
+
+insertServers logins db  = insertLoginsToDB ( DL.map (\ (x,y) -> (Login x y)) logins) db
+  
+serverLogins = [(tgs_id,tgsKey),
+               ("FS1"::String,fs1Key),
+               ("FS2"::String,fs2Key),
+               ("FS3"::String,fs3Key),
+               ("DIR"::String,dirKey),
+               ("LOC"::String,locKey),
+               ("TRN"::String,trnKey)]

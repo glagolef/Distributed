@@ -1,13 +1,5 @@
-{-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE DeriveAnyClass       #-}
-{-# LANGUAGE DeriveGeneric        #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE OverloadedStrings    #-}
-{-# LANGUAGE StandaloneDeriving   #-}
-{-# LANGUAGE TemplateHaskell      #-}
-{-# LANGUAGE TypeOperators        #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE DataKinds,DeriveAnyClass,DeriveGeneric,FlexibleInstances,FlexibleContexts,TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings,StandaloneDeriving,TypeOperators,TypeSynonymInstances,ScopedTypeVariables, PolyKinds #-}
 module Lib
     ( startApp
     , app
@@ -21,7 +13,7 @@ import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.Bson
 import           Data.Bson.Generic
-import qualified Data.List                    as DL   
+import qualified Data.List                    as DL 
 import           Data.Maybe                   (catMaybes)
 import           Database.MongoDB
 import           GHC.Generics
@@ -31,11 +23,10 @@ import           Network.Wai
 import           Network.Wai.Handler.Warp
 import           Network.Wai.Logger
 import           Servant
-import qualified Servant.API                  as SC
-import qualified Servant.Server               as SC
-import qualified Data.Text                    as Text
-import qualified Data.Text.Lazy               as T
-import qualified Data.Text.Lazy.IO            as T
+import           Servant.API                  
+import           Servant.Server               
+import           Data.Text                    hiding (find)         
+import           Data.Text.IO        
 import           System.Directory             
 import           System.Environment           (getArgs, getProgName, lookupEnv)
 import           System.Log.Formatter
@@ -45,25 +36,49 @@ import           System.Log.Handler.Syslog
 import           System.Log.Logger
 import           DistributedAPI
 
-server :: Server DirAPI
-server = sendDir
-    :<|> addDir
-    :<|> delDir 
+server :: Server DirectoryAPI
+server = sendDir:<|> addDir :<|> delDir 
    where
+ sendDir :: EncrMessage -> Handler EncrDirMessage
+ sendDir (msg, ticket) = do
+        session <- liftIO $ getSessionKey dirKey ticket
+        case session of
+          Nothing   -> throwError custom403Err
+          Just sess -> do
+           decryptMsg <- liftIO $ decryptMessage msg sess            
+           liftIO $ warnLog $ "Message Contents: " ++  decryptMsg
+           (record ::(Maybe DirMessage)) <- liftIO $ getFromDB  decryptMsg dirDB
+           case record of
+            Nothing   -> throwError custom403Err
+            Just rec -> do
+             liftIO $ warnLog "Found Records. Encrypting response..."
+             response <- liftIO $ encryptDirMessage rec sess
+             liftIO $ warnLog "Done."
+             return (response, ticket)
 
- sendDir :: Message -> Handler [DirMessage]
- sendDir fc = liftIO $ do
-      withMongoDbConnection $ do
-        records <- find (select ["fileID" =: (T.unpack (content fc))] "FILE_TO_SERVER")  >>= rest
-        return $ catMaybes $ DL.map (\ b ->(fromBSON b :: Maybe DirMessage)) records 
- addDir :: DirMessage -> Handler NoContent
- addDir msg = liftIO $ do
-      withMongoDbConnection $ upsert (select ["fileID" =: (fileID msg)] "FILE_TO_SERVER") $ toBSON msg
-      return NoContent
- delDir :: Message -> Handler NoContent
- delDir msg = liftIO $ do
-  withMongoDbConnection $ delete (select ["fileID" =:  (T.unpack (content msg))] "FILE_TO_SERVER")
-  return NoContent
+ addDir :: EncrDirMessage -> Handler EncrMessage
+ addDir (msg, ticket) = do
+        session <- liftIO $ getSessionKey dirKey ticket
+        case session of
+          Nothing   -> throwError custom403Err
+          Just sess -> do
+            decryptDirMsg <- liftIO $ decryptDirMessage msg sess
+            liftIO $ print decryptDirMsg
+            liftIO $ insertToDB (fileID decryptDirMsg) decryptDirMsg dirDB
+            response <- liftIO $ encryptMessage (Message "Great Addition.") sess
+            return (response,ticket)
+
+ delDir :: EncrMessage -> Handler EncrMessage
+ delDir (msg, ticket) = do
+        session <- liftIO $ getSessionKey dirKey ticket
+        case session of
+          Nothing   -> throwError custom403Err
+          Just sess -> do
+           (decryptMsg) <- liftIO $ decryptMessage msg sess            
+           liftIO $ warnLog $ "Message Contents: " ++  decryptMsg
+           liftIO $ deleteFromDB (decryptMsg) dirDB
+           response <- liftIO $ encryptMessage (Message "Great Deletion.") sess
+           return (response , ticket)
 
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
@@ -74,6 +89,37 @@ startApp = withLogging $ \ aplogger -> do
 app :: Application
 app = serve api server
 
-api :: Proxy DirAPI
+api :: Proxy DirectoryAPI
 api = Proxy
 
+dirKey = "dir_password"  :: Pass
+dirDB = "FILE_TO_SERVER" :: Text
+
+encryptMessage:: Message -> Pass -> IO Message
+encryptMessage (Message msg) pass = do
+  warnLog "Encrypting message..."
+  pack <$> (decr (unpack msg) pass) >>= return . Message
+
+decryptMessage:: Message -> Pass -> IO String
+decryptMessage (Message msg) pass = do
+  warnLog "Encrypting message..."
+  (decr (unpack msg) pass) >>= return 
+
+
+decryptDirMessage:: DirMessage -> Pass -> IO DirMessage
+decryptDirMessage (DirMessage fileID sIP sPort sPath) pass = do
+  warnLog "Decrypting message..."
+  fid <- decr pass fileID
+  sip <- decr pass sIP 
+  spo <- decr pass sPort
+  spa <- decr pass sPath
+  return (DirMessage fid sip spo spa)
+
+encryptDirMessage:: DirMessage -> Pass -> IO DirMessage
+encryptDirMessage (DirMessage fileID sIP sPort sPath) pass = do
+  warnLog "Decrypting message..."
+  fid <- enc pass fileID
+  sip <-  enc pass sIP 
+  spo <- enc pass sPort
+  spa <-  enc pass sPath
+  return (DirMessage fid sip spo spa)

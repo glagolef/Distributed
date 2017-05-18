@@ -12,7 +12,7 @@ module Lib
     ( startApp
     , app
     ) where
-
+import           Prelude hiding (readFile, writeFile)
 import           Control.Concurrent           (forkIO, threadDelay)
 import           Control.Monad                (when)
 import           Control.Monad.IO.Class
@@ -25,7 +25,7 @@ import qualified Data.ByteString.Lazy         as L
 import           Data.Time.Clock
 import qualified Data.List                    as DL
 import           Data.Maybe                   (catMaybes)
-import           Data.Text                    (pack, unpack)
+-- import           Data.Text                    (pack, unpack)
 import           Data.Time.Clock              (UTCTime, getCurrentTime)
 import           Data.Time.Format             (defaultTimeLocale, formatTime)
 import           Database.MongoDB
@@ -40,9 +40,8 @@ import qualified Servant.API                  as SC
 import qualified Servant.Client               as SC
 import qualified Servant.Utils.StaticFiles    as SC
 import qualified Servant.Server               as SC
-import qualified Data.Text                    as Text
-import qualified Data.Text.Lazy               as T
-import qualified Data.Text.Lazy.IO            as T
+import           Data.Text                    
+import           Data.Text.IO                
 import           System.Directory             
 import           System.Environment           (getArgs, getProgName, lookupEnv)
 import           System.Log.Formatter
@@ -66,8 +65,8 @@ isModified Nothing (Just t1) = True
 
 returnFile fp exists isMod = do
           case (exists, isMod) of
-                                  (True,True)    -> liftIO (T.readFile fp) >>= return . Message
-                                  (True, False)  -> return  Message{content= (T.pack "304 Not Modified")}
+                                  (True,True)    -> liftIO (readFile fp) >>= return . Message
+                                  (True, False)  -> return  Message{content= (pack "304 Not Modified")}
                                   _              -> throwError custom404Err
 
 server :: Server FileServerAPI
@@ -77,10 +76,10 @@ server = downloadFile
    where
       downloadFile :: Maybe UTCTime -> File -> Handler Message
       downloadFile modHeader req = do
-          liftIO $ putStr "1. ModHeader: "
+          liftIO $ warnLog "1. ModHeader: "
           liftIO $ print modHeader 
-          let fn = T.unpack $ fpath req
-              cT = (read (T.unpack (fcontents req))) :: Maybe UTCTime
+          let fn = unpack $ fpath req
+              cT = (read (unpack (fcontents req))) :: Maybe UTCTime
           fp <- liftIO $ (\y-> (++) y ("\\" ++ fn)) <$> getCurrentDirectory
           liftIO $ print fp
           exists <- liftIO (doesFileExist fp)
@@ -94,21 +93,21 @@ server = downloadFile
                             Nothing     -> returnFile fp exists True
                             
       uploadFile:: File -> Handler NoContent
-      uploadFile file = do 
-        let fn = T.unpack $ fpath file
+      uploadFile (File fc fp) = do 
+        let fn = unpack $ fp
             cont = fcontents file
         liftIO $ print file
         path <- liftIO $ (\y-> (++) y ("\\" ++ fn)) <$> getCurrentDirectory
         liftIO $ print path
-        liftIO $ T.writeFile path (cont)
+        liftIO $ writeFile path (cont)
         return NoContent
       deleteFile:: Message -> Handler NoContent
       deleteFile fc = do
-        let fp = T.unpack $ content fc
+        let fp = unpack $ content fc
         exists <- liftIO (doesFileExist fp)
         if exists 
           then do 
-            liftIO $ putStrLn ("deleting "++fp )
+            liftIO $ warnLog ("deleting " ++ fp )
             liftIO $ removeFile fp
             >> return NoContent
          else do throwError custom404Err
@@ -125,3 +124,8 @@ app = serve api server
 
 api :: Proxy FileServerAPI
 api = Proxy
+
+
+fs1Key = "fs1_password" ::String
+fs2Key = "fs2_password" ::String
+fs3Key = "fs3_password" ::String

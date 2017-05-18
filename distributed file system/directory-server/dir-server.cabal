@@ -39,6 +39,7 @@ library
                      , http-client
                      , http-api-data
                      , distributed-api
+                     , cryptocipher
 
   default-language:    Haskell2010
 
