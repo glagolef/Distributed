@@ -40,8 +40,6 @@ import           Control.Concurrent
 import           CryptoAPI
 import           DatabaseAPI
 
-
-
 encryptTicket :: Pass -> Pass -> Int -> IO Ticket
 encryptTicket serv_key sess timeout = encrypt serv_key $ sess ++ "\nTicket Valid For:" ++ (show timeout)
 
@@ -57,8 +55,6 @@ getNewSession = do
   session <- liftIO $ C.unpack <$> getEntropy 2048
   return session
 
-
-
 buildNewToken :: Pass -> Key -> Handler Token
 buildNewToken passw server = do
   sess <- liftIO $ getNewSession
@@ -72,7 +68,9 @@ buildNewToken passw server = do
                 liftIO $ (encrypToken tick sess server timeout passw) >>= return
 
 server :: Server SecurityAPI
-server = login :<|> getTicket:<|> registerUser :<|> deleteUser 
+server = login :<|> registerUser
+
+-- server = login :<|> getTicket:<|> registerUser :<|> deleteUser 
 -- ie get TGS token
 login :: AuthRequest -> Handler Token
 login (File log mes) =  do
@@ -111,16 +109,14 @@ deleteUser msg = liftIO $ do
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
   warnLog "Starting security-server."
-  withMongoDbConnection $ delete (select [] serversDB)
+  deleteAllFromDB usersDB
   insertServers serverLogins serversDB
   answ <- getPassw tgs_id serversDB 
   print answ
-  case answ of 
-    Just a -> do
-      warnLog "Done."
-      let settings = setPort 8080 $ setLogger aplogger defaultSettings
-      runSettings settings app
-    Nothing -> warnLog "Something went wrong." >> startApp
+  warnLog "Done."
+  let settings = setPort 8080 $ setLogger aplogger defaultSettings
+  runSettings settings app
+    -- Nothing -> warnLog "Something went wrong." >> startApp
                
 
 

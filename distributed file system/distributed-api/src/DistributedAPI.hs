@@ -41,9 +41,9 @@ type FileServerAPI = "download" :> ReqBody '[JSON] EncrFile :> Get '[JSON] EncrM
                 :<|> "delete"   :> ReqBody '[JSON] EncrMessage :> Delete '[JSON] EncrMessage
 
 type SecurityAPI = "login"     :> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
-              :<|> "get-ticket":> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
-              :<|> "register"  :> ReqBody '[JSON] AuthRequest :> Put '[JSON] Message
-              :<|> "delete"    :> ReqBody '[JSON] Message :> Delete '[JSON] Message
+              -- :<|> "get-ticket":> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
+             :<|>   "register"  :> ReqBody '[JSON] AuthRequest :> Put '[JSON] Message
+              -- :<|> "delete"    :> ReqBody '[JSON] Message :> Delete '[JSON] Message
 
 type ModifiedHeader = Header "If-Modified-Since:" UTCTime
 

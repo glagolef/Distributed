@@ -43,6 +43,9 @@ getMultipleFromDB key records  = do
 deleteFromDB :: Key -> Text -> IO ()
 deleteFromDB record db = withMongoDbConnection $ delete (select ["key" =:  record] db)
 
+deleteAllFromDB :: Text -> IO ()
+deleteAllFromDB db = withMongoDbConnection $ delete (select [] db)
+
 getSessionKey :: Pass -> String -> IO (Maybe Pass)
 getSessionKey passw inp = do
   warnLog "Decrypting ticket..."

@@ -157,7 +157,7 @@ getDir :<|> addDir :<|> delDir = client dirApi
 
 login :: AuthRequest -> ClientM Token
 -- getTicket :: AuthRequest -> ClientM Token
--- registerUser :: AuthRequest -> ClientM Message
+registerUser :: AuthRequest -> ClientM Message
 -- deleteUser :: Message -> ClientM Message
 
 authApi:: Proxy SecurityAPI
@@ -165,14 +165,13 @@ authApi = Proxy
 
 
 loginRequest:: Key -> Pass -> ClientM Token
-loginRequest usr psw = login (File (pack usr) (pack psw)) >>= return
+loginRequest usr psw = login (File (pack usr) (pack(psw))) >>= return
+
+registerRequest:: Key -> Pass -> ClientM Message
+registerRequest usr psw = registerUser (File (pack usr) (pack psw)) >>= return
 
 
-
-
-
-
-login = client authApi
+login :<|> registerUser = client authApi
 -- login :<|> getTicket :<|> registerUser :<|> deleteUser  = client authApi
 
 
@@ -231,27 +230,39 @@ writeF fp fn se ti = do
 
 run :: IO ()
 run = do
-     someFunc
+     doLogin 
   -- cmd <- words <$> getLine
   -- if (queryOK cmd) then (run)
   -- else putStrLn $ if (cmd /= [":q"]) then "Wrong Format." else "Bye."
   -- when (cmd /= [":q"]) run
 
+doRegister:: String -> String -> IO ()
+doRegister user pass = do
+  (msg) <- makeRequest (registerRequest user pass)
+  case msg of
+    Left err -> putStrLn $ "Error: " ++ show err
+    Right (Message m) -> print m
+  
 
-doLogin:: Maybe String -> Maybe String -> IO ()
-doLogin ip p = do
-  putStrLn "Username:"
+-- doLogin:: Maybe String -> Maybe String -> IO ()
+doLogin  = do
+  print  "Login\nUsername:"
   username <- getLine
   putStrLn "Password:"
   password <- getLine
-  print [username,password]
-  tgsToken <- makeRequest (loginRequest username password)
-  print tgsToken
+  -- print [username,password]
+  -- doRegister username password
+
+  encrPass <- encrypt password username  
+  encrToken <- makeRequest (loginRequest username encrPass)
+  case encrToken of
+    Left err -> putStrLn $ "Error: " ++ show err
+    Right (k) -> do
+        decrypToken <- decrypToken k password 
+        print encrToken
+        print decrypToken
+
   
-
-
-
-
 
 
 -- let's put all the hard work in a helper...
@@ -278,35 +289,35 @@ doLogin ip p = do
 -- | The options handling
 
 -- First we invoke the options on the entry point.
-someFunc :: IO ()
-someFunc = do
-  join $ execParser =<< opts
+-- someFunc :: IO ()
+-- someFunc = do
+--   join $ execParser =<< opts
 
 -- | Defined in the applicative style, opts provides a declaration of the entire command line
 --   parser structure. To add a new command just follow the example of the existing commands. A
 --   new 'doCall' function should be defined for your new command line option, with a type matching the
 --   ordering of the application of arguments in the <$> arg1 <*> arg2 .. <*> argN style below.
-opts :: IO (ParserInfo (IO ()))
-opts = do
-  progName <- getProgName
+-- opts :: IO (ParserInfo (IO ()))
+-- opts = do
+--   progName <- getProgName
 
-  return $ info (   helper
-                <*> subparser
-                       (  command "login"
-                                  (withInfo ( doLogin
-                                            <$> serverIpOption
-                                            <*> serverPortOption) "Load an environment variable on the remote server." )))
-               (  fullDesc
-             <> progDesc (progName ++ " is a simple test client for the use-haskell service." ++
-                          " Try " ++ whiteCode ++ progName ++ " --help " ++ resetCode ++ " for more information. To " ++
-                          " see the details of any command, " ++  "try " ++ whiteCode ++ progName ++ " COMMAND --help" ++
-                          resetCode ++ ". The application supports bash completion. To enable, " ++
-                          "ensure you have bash-completion installed and enabled (see your OS for details), the " ++
-                          whiteCode ++ progName ++ resetCode ++
-                          " application in your PATH, and place the following in your ~/.bash_profile : " ++ whiteCode ++
-                          "source < (" ++ progName ++ " --bash-completion-script `which " ++ progName ++ "`)" ++
-                          resetCode )
-             <> header  (redCode ++ "Git revision : " ++ gitRev ++ ", branch: " ++ gitBranch ++ resetCode))
+--   return $ info (   helper
+--                 <*> subparser
+--                        (  command "login"
+--                                   (withInfo ( doLogin
+--                                             <$> serverIpOption
+--                                             <*> serverPortOption) "Load an environment variable on the remote server." )))
+             --   (  fullDesc
+             -- <> progDesc (progName ++ " is a simple test client for the use-haskell service." ++
+             --              " Try " ++ whiteCode ++ progName ++ " --help " ++ resetCode ++ " for more information. To " ++
+             --              " see the details of any command, " ++  "try " ++ whiteCode ++ progName ++ " COMMAND --help" ++
+             --              resetCode ++ ". The application supports bash completion. To enable, " ++
+             --              "ensure you have bash-completion installed and enabled (see your OS for details), the " ++
+             --              whiteCode ++ progName ++ resetCode ++
+             --              " application in your PATH, and place the following in your ~/.bash_profile : " ++ whiteCode ++
+             --              "source < (" ++ progName ++ " --bash-completion-script `which " ++ progName ++ "`)" ++
+             --              resetCode )
+             -- <> header  (redCode ++ "Git revision : " ++ gitRev ++ ", branch: " ++ gitBranch ++ resetCode))
 
 -- helpers to simplify the creation of command line options
 withInfo :: Parser a -> String -> ParserInfo a
