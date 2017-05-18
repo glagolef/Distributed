@@ -1,0 +1,16 @@
+[1 of 2] Compiling Main             ( C:\Users\HOME\AppData\Local\Temp\stack11728\distributive-0.5.0.2\Setup.lhs, C:\Users\HOME\AppData\Local\Temp\stack11728\distributive-0.5.0.2\.stack-work\dist\2fae85dd\setup\Main.o )
+
+C:\Users\HOME\AppData\Local\Temp\stack11728\distributive-0.5.0.2\Setup.lhs:44:69: warning: [-Wdeprecations]
+    In the use of type constructor or class `InstalledPackageId'
+    (imported from Distribution.Package):
+    Deprecated: "Use UnitId instead"
+[2 of 2] Compiling StackSetupShim   ( C:\sr\setup-exe-src\setup-shim-Z6RU0evB.hs, C:\Users\HOME\AppData\Local\Temp\stack11728\distributive-0.5.0.2\.stack-work\dist\2fae85dd\setup\StackSetupShim.o )
+Linking C:\Users\HOME\AppData\Local\Temp\stack11728\distributive-0.5.0.2\.stack-work\dist\2fae85dd\setup\setup.exe ...
+Configuring distributive-0.5.0.2...
+Building distributive-0.5.0.2...
+Preprocessing library distributive-0.5.0.2...
+[1 of 2] Compiling Data.Distributive.Generic ( src\Data\Distributive\Generic.hs, .stack-work\dist\2fae85dd\build\Data\Distributive\Generic.o )
+[2 of 2] Compiling Data.Distributive ( src\Data\Distributive.hs, .stack-work\dist\2fae85dd\build\Data\Distributive.o )
+Installing library in
+C:\sr\snapshots\dac302b0\lib\i386-windows-ghc-8.0.1\distributive-0.5.0.2-Cdz2vLOk85j1doGXLcictT
+Registering distributive-0.5.0.2...

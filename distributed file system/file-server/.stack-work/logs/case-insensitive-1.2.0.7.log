@@ -1,0 +1,14 @@
+Configuring case-insensitive-1.2.0.7...
+Building case-insensitive-1.2.0.7...
+Preprocessing library case-insensitive-1.2.0.7...
+[1 of 3] Compiling Data.CaseInsensitive.Internal ( Data\CaseInsensitive\Internal.hs, .stack-work\dist\2fae85dd\build\Data\CaseInsensitive\Internal.o )
+
+Data\CaseInsensitive\Internal.hs:103:1: warning: [-Wredundant-constraints]
+    * Redundant constraint: FoldCase s
+    * In the type signature for:
+           unsafeMk :: FoldCase s => s -> CI s
+[2 of 3] Compiling Data.CaseInsensitive.Unsafe ( Data\CaseInsensitive\Unsafe.hs, .stack-work\dist\2fae85dd\build\Data\CaseInsensitive\Unsafe.o )
+[3 of 3] Compiling Data.CaseInsensitive ( Data\CaseInsensitive.hs, .stack-work\dist\2fae85dd\build\Data\CaseInsensitive.o )
+Installing library in
+C:\sr\snapshots\dac302b0\lib\i386-windows-ghc-8.0.1\case-insensitive-1.2.0.7-FlqweN7AuKj9EdU2arVEt4
+Registering case-insensitive-1.2.0.7...

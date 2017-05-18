@@ -1,0 +1,95 @@
+
+==================== FINAL INTERFACE ====================
+2016-12-27 20:56:28.730974 UTC
+
+interface client-0.1.0.0-7kRw65xRH1S34QpXFAV6bX:Client 8001
+  interface hash: bb5457c937269f66f8da1262376519b7
+  ABI hash: 340e47ea2a0d68ae1363c2ec97eef8f3
+  export-list hash: 50e37766d2d1b3d93b358b6fe83b1bb6
+  orphan hash: 693e9af84d3dfcc71e640e005bdc5e2e
+  flag hash: a4046e0fdab24403354cf30558c1ea1c
+  sig of: Nothing
+  used TH splices: False
+  where
+exports:
+  Client.client
+  Client.intercalateString
+module dependencies:
+package dependencies: array-0.5.1.1@array-0.5.1.1 base-4.9.0.0
+                      bytestring-0.10.8.1@bytestring-0.10.8.1
+                      deepseq-1.4.2.0@deepseq-1.4.2.0 ghc-prim-0.5.0.0
+                      integer-gmp-1.0.0.1
+                      network-2.6.3.1@network-2.6.3.1-G4Up1CPKbp7DeFsnywOnGG
+orphans: base-4.9.0.0:GHC.Base base-4.9.0.0:GHC.Float
+         network-2.6.3.1@network-2.6.3.1-G4Up1CPKbp7DeFsnywOnGG:Network.Socket
+family instance modules: base-4.9.0.0:Control.Applicative
+                         base-4.9.0.0:Data.Complex base-4.9.0.0:Data.Either
+                         base-4.9.0.0:Data.Functor.Const base-4.9.0.0:Data.Functor.Identity
+                         base-4.9.0.0:Data.List.NonEmpty base-4.9.0.0:Data.Monoid
+                         base-4.9.0.0:Data.Semigroup base-4.9.0.0:Data.Type.Equality
+                         base-4.9.0.0:Data.Version base-4.9.0.0:Data.Void
+                         base-4.9.0.0:GHC.Exts base-4.9.0.0:GHC.Generics
+                         base-4.9.0.0:GHC.IO.Exception base-4.9.0.0:GHC.TypeLits
+import  -/  base-4.9.0.0:Data.Functor 6fc476505db88d678632a4a838125f13
+import  -/  base-4.9.0.0:Data.List 49b86831b79b49ce5d4d9416ecba61df
+import  -/  base-4.9.0.0:Data.OldList 0058409f994fb13ae0616e3f1e5b4dae
+import  -/  base-4.9.0.0:GHC.Base 8ed3be81c0707b322f975a84ae1bb816
+import  -/  base-4.9.0.0:GHC.List 13d2451194c1c6e53b4f4f07947736dd
+import  -/  base-4.9.0.0:Prelude b9bddb97799837fe67a8d00939a5b6c3
+import  -/  base-4.9.0.0:System.IO ad985d7a3fc986e9b9c610fb344d9106
+import  -/  bytestring-0.10.8.1@bytestring-0.10.8.1:Data.ByteString.Char8 6aef0058c6bf280aaddfe6ef70d5f28b
+import  -/  ghc-prim-0.5.0.0:GHC.Types 7378e41b7749213c8c88ceb6b0665d4c
+import  -/  network-2.6.3.1@network-2.6.3.1-G4Up1CPKbp7DeFsnywOnGG:Network.Socket 16daba302e6d1376ace8d6bc8354708f
+import  -/  network-2.6.3.1@network-2.6.3.1-G4Up1CPKbp7DeFsnywOnGG:Network.Socket.ByteString 0651e1723028c296375d19eb3a5afe69
+import  -/  network-2.6.3.1@network-2.6.3.1-G4Up1CPKbp7DeFsnywOnGG:Network.Socket.Internal 6670c66c398fead19fd25cb50e6956e6
+import  -/  network-2.6.3.1@network-2.6.3.1-G4Up1CPKbp7DeFsnywOnGG:Network.Socket.Types c045bc4119b787ed28c457fa81ec4a37
+b00dee7e7438a15878cde601a7ed78ff
+  $trModule :: GHC.Types.Module
+  {- HasNoCafRefs, Strictness: m,
+     Unfolding: (GHC.Types.Module
+                   Client.$trModule2
+                   Client.$trModule1) -}
+ef7045c94c01f409b76aee247d7037c0
+  $trModule1 :: GHC.Types.TrName
+  {- HasNoCafRefs, Strictness: m1,
+     Unfolding: (GHC.Types.TrNameS "Client"#) -}
+8882fe9cdd2c0a648e354e0f5aa35c29
+  $trModule2 :: GHC.Types.TrName
+  {- HasNoCafRefs, Strictness: m1,
+     Unfolding: (GHC.Types.TrNameS
+                   "client-0.1.0.0-7kRw65xRH1S34QpXFAV6bX"#) -}
+808454a636a8d59cdf7f16c05ee0bd3a
+  client :: GHC.Types.IO ()
+  {- Arity: 1, Strictness: <S,U>,
+     Unfolding: InlineRule (0, True, True)
+                Client.client1 `cast` (Sym (GHC.Types.N:IO[0] <()>_R)) -}
+62be717a057ab3a14491470b9aa9bff5
+  client1 ::
+    GHC.Prim.State# GHC.Prim.RealWorld
+    -> (# GHC.Prim.State# GHC.Prim.RealWorld, () #)
+  {- Arity: 1, Strictness: <S,U> -}
+b8a789a11eac0bdfb51993efd4bf9baa
+  intercalateString :: GHC.Base.String -> GHC.Base.String
+  {- Arity: 1, Strictness: <S,1*U>,
+     Unfolding: (\ (message :: GHC.Base.String) ->
+                 case Data.OldList.words message of wild {
+                   [] -> GHC.Types.[] @ GHC.Types.Char
+                   : x xs1
+                   -> Data.OldList.intercalate_$spoly_go
+                        @ GHC.Types.Char
+                        x
+                        (Data.OldList.prependToAll
+                           @ [GHC.Types.Char]
+                           Client.intercalateString1
+                           xs1) }) -}
+a9afe9340ce0eaa1d81493f9d892fa6b
+  intercalateString1 :: [GHC.Types.Char]
+  {- Unfolding: (GHC.CString.unpackCString# "+"#) -}
+vectorised variables:
+vectorised tycons:
+vectorised reused tycons:
+parallel variables:
+parallel tycons:
+trusted: none
+require own pkg trusted: False
+
