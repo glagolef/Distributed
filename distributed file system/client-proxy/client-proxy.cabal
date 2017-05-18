@@ -36,7 +36,12 @@ library
                      , transformers
                      , http-api-data
                      , distributed-api
-                     , cryptocipher
+                     , bytestring
+                     , git-embed
+                     , pretty
+                     , optparse-applicative
+                     , Cabal
+                     , ansi-terminal
 
   default-language:    Haskell2010
 

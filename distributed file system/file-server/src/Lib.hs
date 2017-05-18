@@ -18,12 +18,8 @@ import           Control.Monad                (when)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except   (ExceptT)
 import           Control.Monad.Trans.Resource
-import           Data.Aeson
-import           Data.Aeson.TH
-import           Data.Bson
 import qualified Data.ByteString.Lazy         as L
 import qualified Data.List                    as DL
-import           Data.Maybe                   (catMaybes)
 import           Data.Text                    hiding (find)         
 import           Data.Text.IO        
 import           Data.Time.Clock              (UTCTime, getCurrentTime,diffUTCTime )
@@ -47,9 +43,9 @@ import           System.Log.Handler.Simple
 import           System.Log.Handler.Syslog
 import           System.Log.Logger
 import           Web.HttpApiData
-import qualified Servant.API.Header           as H
 import           DistributedAPI
-
+import           CryptoAPI
+import           DatabaseAPI (getSessionKey)
 getModTime:: FilePath -> Bool -> IO (Maybe UTCTime)
 getModTime fp True = liftIO $ do 
   modTime <- getModificationTime fp
@@ -65,13 +61,13 @@ server = downloadFile
     :<|> uploadFile
     :<|> deleteFile 
    where
-      downloadFile :: Maybe UTCTime -> EncrFile -> Handler EncrMessage
-      downloadFile modHeader (msg, ticket) = do
+      downloadFile :: EncrFile -> Handler EncrMessage
+      downloadFile (msg, ticket) = do
         session <- liftIO $ getSessionKey fsKey ticket
         case session of
           Nothing   -> throwError custom403Err
           Just sess -> do
-           (File p fc) <- liftIO $ cryptFile msg sess decr
+           (File p fc) <- liftIO $ cryptFile msg sess decrypt
            let (path,cont) =  (unpack p, read (unpack fc) :: Maybe UTCTime) 
            liftIO $ warnLog $ "Message Path: "     ++  path  
            liftIO $ warnLog $ "Message Contents: " ++  (show cont)
@@ -99,7 +95,7 @@ server = downloadFile
         case session of
           Nothing   -> throwError custom403Err
           Just sess -> do
-           (File p fc) <- liftIO $ cryptFile msg sess decr
+           (File p fc) <- liftIO $ cryptFile msg sess decrypt
            let path =  unpack p
            liftIO $ warnLog $ "Message Path: "     ++  path  
            liftIO $ warnLog $ "Message Contents: " ++  (show fc)
@@ -138,5 +134,6 @@ app = serve api server
 api :: Proxy FileServerAPI
 api = Proxy
 
-
 fsKey = "fs1_password" ::String
+-- fs2Key = "fs2_password" ::String
+-- fs3Key = "fs3_password" ::String

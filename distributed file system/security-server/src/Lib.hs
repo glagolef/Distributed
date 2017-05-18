@@ -37,25 +37,20 @@ import           System.Log.Handler.Syslog
 import           System.Log.Logger
 import           System.Entropy
 import           Control.Concurrent
+import           CryptoAPI
+import           DatabaseAPI
 
 
 
 encryptTicket :: Pass -> Pass -> Int -> IO Ticket
-encryptTicket serv_key sess timeout = enc serv_key $ sess ++ "\nTicket Valid For:" ++ (show timeout)
+encryptTicket serv_key sess timeout = encrypt serv_key $ sess ++ "\nTicket Valid For:" ++ (show timeout)
 
 encrypToken :: Ticket -> Pass -> Key -> Int -> Pass -> IO Token
 encrypToken ticket session server timeout pass  = do
-  sess <- liftIO $ enc pass session
-  serv <- liftIO $ enc pass server 
-  to   <- liftIO $ enc pass (show timeout)
+  sess <- liftIO $ encrypt pass session
+  serv <- liftIO $ encrypt pass server 
+  to   <- liftIO $ encrypt pass (show timeout)
   return $ Token ticket sess serv to
-
-decrypToken:: Token -> Pass -> IO Token
-decrypToken (Token ticket session server timeout) pass = do
-  sess <- liftIO $ decr pass session
-  serv <- liftIO $ decr pass server 
-  to   <- liftIO $ decr pass timeout
-  return $ Token ticket sess serv (read to :: Int)
 
 getNewSession:: IO String
 getNewSession = do
@@ -78,7 +73,7 @@ buildNewToken passw server = do
 
 server :: Server SecurityAPI
 server = login :<|> getTicket:<|> registerUser :<|> deleteUser 
-
+-- ie get TGS token
 login :: AuthRequest -> Handler Token
 login (File log mes) =  do
         let (login, message) = mapTuple unpack (log,mes)
@@ -86,7 +81,7 @@ login (File log mes) =  do
         liftIO $ print rec
         case rec of
           Just passw -> do
-            valid <- liftIO $ decr passw message
+            valid <- liftIO $ decrypt passw message
             case (login == valid) of
               True  -> buildNewToken tgs_id passw 
               False -> throwError custom401Err
@@ -98,7 +93,7 @@ getTicket (File log mes) =  do
         case req of 
           Nothing   -> throwError custom401Err
           Just sess -> do
-            server <- liftIO $ decr sess encr_msg
+            server <- liftIO $ decrypt sess encr_msg
             buildNewToken sess server
 
 registerUser :: AuthRequest -> Handler Message

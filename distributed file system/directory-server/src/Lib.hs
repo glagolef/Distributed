@@ -33,7 +33,8 @@ import           System.Log.Handler.Simple
 import           System.Log.Handler.Syslog
 import           System.Log.Logger
 import           DistributedAPI
-
+import           CryptoAPI
+import           DatabaseAPI
 server :: Server DirectoryAPI
 server = sendDir:<|> addDir :<|> delDir 
    where
@@ -50,7 +51,7 @@ server = sendDir:<|> addDir :<|> delDir
             Nothing   -> throwError custom403Err
             Just rec -> do
              liftIO $ warnLog "Found Records. Encrypting response..."
-             response <- liftIO $ cryptDirMessage rec sess (enc)
+             response <- liftIO $ cryptDirMessage rec sess (encrypt)
              liftIO $ warnLog "Done."
              return (response, ticket)
 
@@ -60,7 +61,7 @@ server = sendDir:<|> addDir :<|> delDir
         case session of
           Nothing   -> throwError custom403Err
           Just sess -> do
-            decryptDirMsg <- liftIO $ cryptDirMessage msg sess (decr)
+            decryptDirMsg <- liftIO $ cryptDirMessage msg sess (decrypt)
             liftIO $ print decryptDirMsg
             liftIO $ insertToDB (fileID decryptDirMsg) decryptDirMsg dirDB
             response <- liftIO $ encryptMessage (Message "Great Addition.") sess

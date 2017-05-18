@@ -11,32 +11,33 @@
 module Lib
     ( run
     ) where
-import Crypto.Cipher.AES.Haskell
 import Control.Monad.IO.Class
 import Data.Aeson
-import Data.List
+import Data.List         as D 
 import Servant
-import Data.Proxy   as P
+import Data.Proxy
 import GHC.Generics
-import Network.HTTP.Client
+import Network.HTTP.Client hiding (Proxy)
 import Servant.API
 import Servant.Client
 import System.Directory 
-import Data.List.Split            
+import Data.List.Split        as D           
 import System.IO.Error
 import Control.Exception
 import Data.Time.Clock
 import System.IO
 import Web.HttpApiData
 import Control.Monad
-import qualified Data.Text          as Text
-import qualified Data.Text.Lazy     as T
-import qualified Data.Text.Lazy.IO  as T
+import Data.Text (pack, unpack)
+import qualified Data.Text.IO as T
 import DistributedAPI
 import DistributedAPIClient
 import Options.Applicative
 import System.Environment
-import qualified Data.ByteString.Char8    as B
+import CryptoAPI
+import qualified Data.ByteString.Char8    as C
+import           Git.Embed
+
 replace old new = intercalate new . splitOn old
 
 getFilesDir:: FilePath -> String -> FilePath
@@ -55,7 +56,127 @@ queryOK ["open",_, mode] = elem mode ["-r","-a"]
 queryOK ["delete", _]    = True
 queryOK _                = False
 
-makeQuery inp@(x:xs) = do
+
+makeRequest req = do
+  manager <- newManager defaultManagerSettings
+  request <- return $ req
+  res <- runClientM request (ClientEnv manager (BaseUrl Http "localhost" 8080 ""))
+  return res
+
+
+download :: EncrFile -> ClientM EncrMessage
+upload   :: EncrFile -> ClientM EncrMessage
+removeF   :: EncrMessage -> ClientM EncrMessage
+
+(download :<|> upload :<|> removeF) = client api
+
+api :: Proxy FileServerAPI
+api = Proxy
+
+downloadRequest:: Maybe UTCTime -> FilePath -> Pass -> Ticket -> ClientM EncrMessage
+downloadRequest modTime newfp sess ticket = do 
+    let req = File (pack newfp) (pack (show modTime))
+    encReq <- liftIO $ cryptFile req sess encrypt
+    download (encReq, ticket) >>= return
+
+getFile:: [String] -> Maybe UTCTime -> FilePath -> FilePath -> String -> Pass -> Ticket-> IO Bool
+getFile (x:xs) modTime fp newfp div session ticket = do
+  print modTime
+  encResp <- makeRequest (downloadRequest modTime newfp session ticket)
+  case encResp of
+    Left  err -> putStrLn ("Error: " ++ show err) >> return False
+    Right (msg, ticket) -> do
+        contents <- decryptMessage msg session
+        if (contents == "304 Not Modified") then return True
+          else do
+                  createDirectoryIfMissing True $ reverse (dropWhile (/=(head div)) (reverse fp))
+                  writeFile fp contents
+                  return True
+
+uploadRequest:: FilePath -> String ->  Pass ->  Ticket -> ClientM EncrMessage
+uploadRequest fp fn sess tick =  do
+    cont <- liftIO $ T.readFile fp
+    let req = File (pack fn) cont
+    encReq <- liftIO $ cryptFile req sess encrypt
+    upload (encReq, tick) >>= return 
+
+uploadFile:: FilePath -> FilePath -> Pass -> Ticket -> IO () 
+uploadFile fp fn sess tick = do
+  encResp <- makeRequest (uploadRequest fp fn sess tick)
+  print encResp
+  case encResp of
+    Left err -> putStrLn $ "Error: " ++ show err
+    Right (msg, ticket) -> do
+      contents <- decryptMessage msg sess
+      warnLog $ contents
+      -- tick==ticket
+      putStrLn $ "File uploaded: " ++ fn
+
+
+deleteRequest:: FilePath -> Pass -> Ticket -> ClientM EncrMessage
+deleteRequest fn sess ticket = do
+    let req = Message (pack fn)
+    encReq <- liftIO $ encryptMessage req sess
+    removeF (encReq, ticket) >>= return
+
+
+deleteFile:: FilePath -> FilePath -> Pass -> Ticket -> IO ()
+deleteFile fp fn sess ticket = do
+  exists <- doesFileExist fp
+  when exists $ do 
+        putStrLn ("Deleting "++ fn )
+        removeFile fp
+  encResp <- makeRequest (deleteRequest fn sess ticket)
+  case encResp of
+    Left err -> putStrLn $ "Error: " ++ show err
+    Right (msg, ticket) -> do
+      contents <- decryptMessage msg sess
+      warnLog $ contents
+      putStrLn $ "File uploaded: " ++ fn
+
+
+
+
+
+
+
+
+
+
+getDir :: EncrMessage -> ClientM EncrDirMessage
+addDir :: EncrDirMessage -> ClientM EncrMessage
+delDir :: EncrMessage -> ClientM EncrMessage
+
+dirApi :: Proxy DirectoryAPI
+dirApi = Proxy
+
+getDir :<|> addDir :<|> delDir = client dirApi
+
+
+
+
+login :: AuthRequest -> ClientM Token
+-- getTicket :: AuthRequest -> ClientM Token
+-- registerUser :: AuthRequest -> ClientM Message
+-- deleteUser :: Message -> ClientM Message
+
+authApi:: Proxy SecurityAPI
+authApi = Proxy
+
+
+loginRequest:: Key -> Pass -> ClientM Token
+loginRequest usr psw = login (File (pack usr) (pack psw)) >>= return
+
+
+
+
+
+
+login = client authApi
+-- login :<|> getTicket :<|> registerUser :<|> deleteUser  = client authApi
+
+
+makeQuery inp@(x:xs) ticket session = do
   curDir <-getCurrentDirectory
   let (div,fn) = case isInfixOf "\\" curDir of True  -> ("\\", (replace "/" "\\" (head xs)))
                                                False -> ("\\", (replace "\\" "/" (head xs)))
@@ -67,106 +188,54 @@ makeQuery inp@(x:xs) = do
   modTime <- getModTime fp exists
   case x of
     "open"   -> do 
-      gotFile <- getFile inp modTime fp newfp div
-      when gotFile $
-        case last xs of 
-      -- readF fp
-        "-r" -> readF fp
-        -- "-w" -> writeF fp newfp
-        "-a" -> appendF fp newfp
-    -- "write"  -> do
-    --   getFile inp modTime fp newfp
-    --   writeF fp newfp
-    "delete" -> deleteFile fp newfp
+      gotFile <- getFile inp modTime fp newfp div session ticket
+      run 
+    --   when gotFile $
+    --     case last xs of 
+    --   -- readF fp
+    --     "-r" -> readF fp
+    --     -- "-w" -> writeF fp newfp session ticket
+    --     "-a" -> appendF fp newfp session ticket
+    -- -- "write"  -> do
+    -- --   getFile inp modTime fp newfp div session ticket
+    -- --   writeF fp newfp
+    -- "delete" -> deleteFile fp newfp
 
 
-downloadRequest:: Maybe UTCTime -> FilePath -> ClientM Message
-downloadRequest modTime newfp = do 
-    req <- download modTime File {fpath = (T.pack newfp), fcontents = (T.pack (show modTime))}
-    return req
 
-uploadRequest:: FilePath -> String -> ClientM NoContent
-uploadRequest fp fn =  do
-    cont <- liftIO $ T.readFile fp
-    req <- upload File {fpath = (T.pack fn), fcontents = cont}
-    return req
 
-deleteRequest:: String -> ClientM NoContent
-deleteRequest fn = do
-  req <- remove Message {content = (T.pack fn)}
-  return req
 
-loginRequest:: String -> ByteString -> ClientM Message
-loginRequest usr psw = do
-  req <- login File{fpath = usr, fcontents = psw}
-  return req
+
+
 
 readF :: FilePath -> IO ()
 readF fp = do
-  contents <- T.readFile fp
+  contents <- readFile fp
   print contents
 
-appendF::FilePath -> FilePath -> IO ()
-appendF fp fn = do
+appendF::FilePath -> FilePath -> Pass -> Ticket -> IO ()
+appendF fp fn se ti = do
   nextLine <- getLine
   appendFile fp nextLine
-  uploadFile fp fn
+  uploadFile fp fn se ti
 
-writeF :: FilePath -> FilePath -> IO ()
-writeF fp  fn = do
+writeF :: FilePath -> FilePath -> Pass -> Ticket -> IO ()
+writeF fp fn se ti = do
   mt <- getModTime fp True
-  contents <- T.readFile fp
+  contents <- readFile fp
   return contents
   newmt <- getModTime fp True
   if (mt/=newmt) 
-    then uploadFile fp fn
+    then uploadFile fp fn se ti
     else putStrLn "File Not Modified."
-
-getFile:: [String] -> Maybe UTCTime -> FilePath -> String -> String -> IO Bool
-getFile (x:xs) modTime fp newfp div= do
-  print modTime
-  res <- makeRequest (downloadRequest modTime newfp)
-  case res of
-    Left err -> putStrLn ("Error: " ++ show err) >> return False
-    Right (contents) -> do
-        if (content contents == "304 Not Modified") then return True
-          else do
-                  createDirectoryIfMissing True $ reverse (dropWhile (/=(head div)) (reverse fp))
-                  T.writeFile fp (content contents)
-                  return True
-uploadFile:: FilePath -> FilePath -> IO () 
-uploadFile fp fn = do
-  res <- makeRequest (uploadRequest fp fn)
-  print res
-  case res of
-    Left err -> putStrLn $ "Error: " ++ show err
-    Right (contents) -> putStrLn $ "File uploaded: " ++ fn 
-
-deleteFile:: FilePath -> String -> IO ()
-deleteFile fp fn = do
-  exists <- liftIO (doesFileExist fp)
-  when exists $ do 
-        putStrLn ("Deleting "++ fn )
-        removeFile fp
-  res <- makeRequest (deleteRequest fn)
-  case res of
-    Left err -> putStrLn $ "Error: " ++ show err
-    Right (contents) -> putStrLn $ "File deleted: " ++ fn 
-
-
-makeRequest req = do
-  manager <- newManager defaultManagerSettings
-  request <- return $ req
-  res <- runClientM request (ClientEnv manager (BaseUrl Http "localhost" 8080 ""))
-  return res
 
 run :: IO ()
 run = do
-  cmd <- words <$> getLine
-  if (queryOK cmd) then (makeQuery cmd)
-  else putStrLn $ if (cmd /= [":q"]) then "Wrong Format." else "Bye."
-  when (cmd /= [":q"]) run
-
+     someFunc
+  -- cmd <- words <$> getLine
+  -- if (queryOK cmd) then (run)
+  -- else putStrLn $ if (cmd /= [":q"]) then "Wrong Format." else "Bye."
+  -- when (cmd /= [":q"]) run
 
 
 doLogin:: Maybe String -> Maybe String -> IO ()
@@ -176,65 +245,68 @@ doLogin ip p = do
   putStrLn "Password:"
   password <- getLine
   print [username,password]
-
-  let key = initKey256 (B.pack password)
-  msg = decodeUtf8' $ encrypt (Right key) username
-  case msg of 
-    Left err -> print "Encryption Error"
-    Right m -> doCall $ makeRequest $ loginRequest username msg
- 
+  tgsToken <- makeRequest (loginRequest username password)
+  print tgsToken
+  
 
 
 
 
 
 
+-- let's put all the hard work in a helper...
+-- doCall f h p = reportExceptionOr (putStrLn "Error") (runClientM f =<< env h p)
+
+-- -- which makes the actual rest calls trivial...(notice the currying)
+
+-- doLoadEnvVars :: Maybe String -> Maybe String -> Maybe String -> IO ()
+-- doLoadEnvVars s = doCall $ loadEnvVars s
+
+-- doGetREADME :: Maybe String -> Maybe String -> IO ()
+-- doGetREADME  = doCall getREADME
+
+-- doStoreMessage :: String -> String -> Maybe String -> Maybe String -> IO ()
+-- doStoreMessage n m  = doCall $ storeMessage $ Message n m
+
+-- doSearchMessage :: String -> Maybe String -> Maybe String -> IO ()
+-- doSearchMessage s  = doCall $ searchMessage $ Just s
+
+-- doPerformRestCall :: Maybe String -> Maybe String -> Maybe String -> IO ()
+-- doPerformRestCall s  =  doCall $ performRestCall s
 
 
+-- | The options handling
 
+-- First we invoke the options on the entry point.
+someFunc :: IO ()
+someFunc = do
+  join $ execParser =<< opts
 
-
-
-
-
-
-doCall f h p = reportExceptionOr (putStrLn . resp) (SC.runClientM f =<< env h p)
-
-
+-- | Defined in the applicative style, opts provides a declaration of the entire command line
+--   parser structure. To add a new command just follow the example of the existing commands. A
+--   new 'doCall' function should be defined for your new command line option, with a type matching the
+--   ordering of the application of arguments in the <$> arg1 <*> arg2 .. <*> argN style below.
 opts :: IO (ParserInfo (IO ()))
 opts = do
   progName <- getProgName
+
   return $ info (   helper
                 <*> subparser
                        (  command "login"
                                   (withInfo ( doLogin
                                             <$> serverIpOption
-                                            <*> serverPortOption) "Log in.")
-
-                       -- <> command "get-readme"
-                       --            (withInfo ( doGetREADME
-                       --                    <$> serverIpOption
-                       --                    <*> serverPortOption) "Get a remote README file." )
-                       -- <> command "store-message"
-                       --            (withInfo ( doStoreMessage
-                       --                    <$> argument str (metavar "Name")
-                       --                    <*> argument str (metavar "Message")
-                       --                    <*> serverIpOption
-                       --                    <*> serverPortOption) "Store a message on the remote server." )
-                       -- <> command "search-message"
-                       --            (withInfo ( doSearchMessage
-                       --                    <$> argument str (metavar "Name")
-                       --                    <*> serverIpOption
-                       --                    <*> serverPortOption) "Search for messages on the remote server." )
-                       -- <> command "rest-call"
-                       --             (withInfo ( doPerformRestCall
-                       --                     <$> optional (strOption ( long "search"
-                       --                                            <> short 's'
-                       --                                            <> help "The search string for the hackage call."))
-                       --                     <*> serverIpOption
-                       --                     <*> serverPortOption) "Do a hackage rest call from the remote server." ))
-                       ))
-
+                                            <*> serverPortOption) "Load an environment variable on the remote server." )))
+               (  fullDesc
+             <> progDesc (progName ++ " is a simple test client for the use-haskell service." ++
+                          " Try " ++ whiteCode ++ progName ++ " --help " ++ resetCode ++ " for more information. To " ++
+                          " see the details of any command, " ++  "try " ++ whiteCode ++ progName ++ " COMMAND --help" ++
+                          resetCode ++ ". The application supports bash completion. To enable, " ++
+                          "ensure you have bash-completion installed and enabled (see your OS for details), the " ++
+                          whiteCode ++ progName ++ resetCode ++
+                          " application in your PATH, and place the following in your ~/.bash_profile : " ++ whiteCode ++
+                          "source < (" ++ progName ++ " --bash-completion-script `which " ++ progName ++ "`)" ++
+                          resetCode )
+             <> header  (redCode ++ "Git revision : " ++ gitRev ++ ", branch: " ++ gitBranch ++ resetCode))
 
 -- helpers to simplify the creation of command line options
 withInfo :: Parser a -> String -> ParserInfo a
@@ -253,6 +325,13 @@ serverPortOption = optional $ strOption (  long "port"
                                         <> metavar "PORT_NUMBER"
                                         <> help "The port number of the use-haskell service.")
 
+
+
+-- | function to build the client environment for performing a servant client rest call
+-- It uses the host name and port parameters if Just x, or else uses envrionment variables
+-- This uses an applicative programming style that is very condensed, and easy to understand when you get used to it,
+-- compared to the alternative sequence of calls and subsequent record construction.
+
 env :: Maybe String -> Maybe String -> IO ClientEnv
 env host port = ClientEnv <$> newManager defaultManagerSettings
                              <*> (BaseUrl <$> pure Http
@@ -264,10 +343,24 @@ env host port = ClientEnv <$> newManager defaultManagerSettings
    h <?> f = case h of
      Just hst -> return hst
      Nothing  -> f
+
+   -- | The url endpoint for contactingt the use-haskell service
    usehaskellHost :: IO String
    usehaskellHost = devEnv "USE_HASKELL_HOST" id "localhost" True
+
+   -- | The neo4j port
    usehaskellPort :: IO String
    usehaskellPort = devEnv "USE_HASKELL_PORT" id "8080" True
+
+
+   -- | Helper function to simplify the setting of environment variables
+   -- function that looks up environment variable and returns the result of running funtion fn over it
+   -- or if the environment variable does not exist, returns the value def. The function will optionally log a
+   -- warning based on Boolean tag
+
+   -- note that this is a good example of a commonly required function that could usefully be put in a shared library
+   -- but I'm not going to do that for now.
+
    devEnv :: Show a
           => String        -- Environment Variable name
           -> (String -> a)  -- function to process variable string (set as 'id' if not needed)
