@@ -1,0 +1,14 @@
+Preprocessing library client-proxy-0.1.0.0...
+[1 of 1] Compiling Lib              ( src\Lib.hs, .stack-work\dist\2fae85dd\build\Lib.o )
+Preprocessing executable 'client-proxy-exe' for client-proxy-0.1.0.0...
+[1 of 1] Compiling Main             ( app\Main.hs, .stack-work\dist\2fae85dd\build\client-proxy-exe\client-proxy-exe-tmp\Main.o ) [Lib changed]
+
+app\Main.hs:7:1: warning: [-Wtabs]
+    Tab character found here, and in one further location.
+    Please use spaces instead.
+Linking .stack-work\dist\2fae85dd\build\client-proxy-exe\client-proxy-exe.exe ...
+Installing library in
+C:\Users\HOME\Desktop\project\client-proxy\.stack-work\install\be9a2133\lib\i386-windows-ghc-8.0.1\client-proxy-0.1.0.0-LyViFaiq3545JbiIEj64e8
+Installing executable(s) in
+C:\Users\HOME\Desktop\project\client-proxy\.stack-work\install\be9a2133\bin
+Registering client-proxy-0.1.0.0...

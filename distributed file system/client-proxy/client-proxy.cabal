@@ -6,7 +6,7 @@ homepage:            https://github.com/githubuser/client-proxy#readme
 license:             BSD3
 license-file:        LICENSE
 author:              Author name here
-maintainer:          example@example.com
+maintainer:          glagolef@tcd.ie
 copyright:           2017 Author name here
 category:            Web
 build-type:          Simple

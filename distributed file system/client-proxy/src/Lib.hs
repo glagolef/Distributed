@@ -64,14 +64,14 @@ makeRequest req = do
   return res
 
 
-download :: EncrFile -> ClientM EncrMessage
-upload   :: EncrFile -> ClientM EncrMessage
-removeF   :: EncrMessage -> ClientM EncrMessage
+-- download :: EncrFile -> ClientM EncrMessage
+-- upload   :: EncrFile -> ClientM EncrMessage
+-- removeF   :: EncrMessage -> ClientM EncrMessage
 
-(download :<|> upload :<|> removeF) = client api
+-- (download :<|> upload :<|> removeF) = client api
 
-api :: Proxy FileServerAPI
-api = Proxy
+-- api :: Proxy FileServerAPI
+-- api = Proxy
 
 downloadRequest:: Maybe UTCTime -> FilePath -> Pass -> Ticket -> ClientM EncrMessage
 downloadRequest modTime newfp sess ticket = do 
@@ -143,25 +143,25 @@ deleteFile fp fn sess ticket = do
 
 
 
-getDir :: EncrMessage -> ClientM EncrDirMessage
-addDir :: EncrDirMessage -> ClientM EncrMessage
-delDir :: EncrMessage -> ClientM EncrMessage
+-- getDir :: EncrMessage -> ClientM EncrDirMessage
+-- addDir :: EncrDirMessage -> ClientM EncrMessage
+-- delDir :: EncrMessage -> ClientM EncrMessage
 
-dirApi :: Proxy DirectoryAPI
-dirApi = Proxy
+-- dirApi :: Proxy DirectoryAPI
+-- dirApi = Proxy
 
-getDir :<|> addDir :<|> delDir = client dirApi
-
-
+-- getDir :<|> addDir :<|> delDir = client dirApi
 
 
-login :: AuthRequest -> ClientM Token
+
+
+-- login :: AuthRequest -> ClientM Token
 -- getTicket :: AuthRequest -> ClientM Token
-registerUser :: AuthRequest -> ClientM Message
+-- registerUser :: AuthRequest -> ClientM Message
 -- deleteUser :: Message -> ClientM Message
 
-authApi:: Proxy SecurityAPI
-authApi = Proxy
+-- authApi:: Proxy SecurityAPI
+-- authApi = Proxy
 
 
 loginRequest:: Key -> Pass -> ClientM Token
