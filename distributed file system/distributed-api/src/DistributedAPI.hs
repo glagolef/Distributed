@@ -41,9 +41,10 @@ type FileServerAPI = "download" :> ReqBody '[JSON] EncrFile :> Get '[JSON] EncrM
                 :<|> "delete"   :> ReqBody '[JSON] EncrMessage :> Delete '[JSON] EncrMessage
 
 type SecurityAPI = "login"     :> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
-              -- :<|> "get-ticket":> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
-             :<|>   "register"  :> ReqBody '[JSON] AuthRequest :> Put '[JSON] Message
-              -- :<|> "delete"    :> ReqBody '[JSON] Message :> Delete '[JSON] Message
+              :<|> "logout"     :> ReqBody '[JSON] Message :> Get '[JSON] Message
+              :<|> "get-ticket":> ReqBody '[JSON] AuthRequest :> Get '[JSON] Token
+              :<|> "register"  :> ReqBody '[JSON] AuthRequest :> Put '[JSON] Message
+              :<|> "removeUser" :> ReqBody '[JSON] AuthRequest :> Delete '[JSON] Message
 
 type ModifiedHeader = Header "If-Modified-Since:" UTCTime
 
@@ -51,6 +52,7 @@ type Key  = String
 type Pass = String
 type AuthRequest = File
 type Ticket = String
+type Session = String
 
 type EncrMessage =    (Message,Ticket)
 type EncrDirMessage = (DirMessage,Ticket)

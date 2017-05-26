@@ -13,7 +13,7 @@ import           Data.Text                          hiding (find)
 import           Database.MongoDB
 import           Control.Concurrent                 (forkIO, threadDelay)
 import           Data.Char                          (isDigit)
-
+import           Data.Hashable
 import           CryptoAPI                          (decrypt)
 import           DistributedAPI
 
@@ -25,19 +25,23 @@ getPassw key records = do
 insertToDB :: (ToBSON t) => Key -> t -> Text -> IO ()
 insertToDB key value records = withMongoDbConnection $ do upsert (select ["key" =: key] records) $ toBSON value
 
-insertLoginsToDB :: (ToBSON t) => [t] -> Text -> IO ()
+insertLoginsToDB :: [Login] -> Text -> IO ()
 insertLoginsToDB logins records = withMongoDbConnection $ do insertMany_ records $ DL.map toBSON logins
 
 getFromDB :: (FromBSON t) => Key -> Text -> IO (Maybe t)
 getFromDB key records = do
       withMongoDbConnection $ do
-        vals <- find (select ["key" =: key] records) >>= drainCursor
-        return $ fromBSON $ DL.head vals
+        vals <- findOne (select ["key" =: key] records)
+        -- return $ DL.head $ catMaybes $ DL.map (\b -> fromBSON b) vals
+        return $ maybe Nothing fromBSON vals
 
-getMultipleFromDB :: (FromBSON t) => Key -> Text -> IO [t]
+getMultipleFromDB :: (FromBSON t) => (Maybe Key) -> Text -> IO [t]
 getMultipleFromDB key records  = do
       withMongoDbConnection $ do
-        vals <- find (select ["key" =: key] records) >>= drainCursor
+        vals <- case key of
+          Just k -> find (select ["key" =: key] records) >>= drainCursor
+          Nothing -> find (select [] records) >>= drainCursor
+        -- vals <- find (select ["key" =: key] records) >>= drainCursor
         return $ catMaybes $ DL.map (\b -> fromBSON b) vals
             
 deleteFromDB :: Key -> Text -> IO ()
@@ -48,18 +52,22 @@ deleteAllFromDB db = withMongoDbConnection $ delete (select [] db)
 
 getSessionKey :: Pass -> String -> IO (Maybe Pass)
 getSessionKey passw inp = do
-  warnLog "Decrypting ticket..."
+  warnLog "Decrypting ticket...."
   answ <- decrypt passw inp
+  warnLog answ
   case (DL.isInfixOf "Ticket Valid For:" answ) of
     False -> return Nothing
     True  -> do
-       let sess = DL.head $ DL.lines answ
+       let sess =  DL.head $ DL.lines answ
+       warnLog sess
        isValid <- isValidSess sess
+       print isValid
        case isValid of
-           False ->  do
+           False -> do
               warnLog "New Session."
-              let timeout = read $ DL.last $ DL.takeWhile (DL.all isDigit) (DL.tails answ)
-              forkIO $ (addSession sess timeout) 
+              let timeout = DL.filter (isDigit) (DL.last (DL.lines answ))
+              warnLog $ show $ timeout
+              forkIO $ (addSession sess sess timeout) 
               return (Just sess)
            True  -> return (Just sess)
 
@@ -68,14 +76,18 @@ isValidSess key = do
         (passw ::(Maybe Key)) <- getFromDB key sessDB
         return (isJust passw)
 
-addSession:: Pass -> Int -> IO ()
-addSession session timeout = do
-  warnLog $ "Session " ++ session ++ " valid for " ++ (show (div timeout 60)) ++ " minutes."
-  insertToDB session session sessDB
-  threadDelay timeout
-  deleteFromDB session sessDB
-  warnLog $"Session " ++ session ++ " expired."
+addSession:: Key-> Pass -> String -> IO ()
+addSession key session timeout = do
+  warnLog $ "Session valid for " ++ (show ((read timeout) `div` (1000*1000*60))) ++ " minutes."
+  insertToDB key session sessDB
+  threadDelay (read timeout)
+  deleteSession key
 
+
+deleteSession :: Pass -> IO ()
+deleteSession session = do
+  deleteFromDB session sessDB
+  warnLog $"Session expired."
 
 withMongoDbConnection :: Action IO a -> IO a
 withMongoDbConnection act  = do

@@ -12,7 +12,7 @@ import           DistributedAPI
 encrypt:: Pass -> Key -> IO String
 encrypt passw inp = C.unpack <$> Crypto.encrypt (C.pack passw) (C.pack inp) >>= return 
 
-decrypt :: Pass -> String -> IO String
+decrypt :: Pass -> Key -> IO String
 decrypt passw inp = C.unpack <$> Crypto.decrypt (C.pack passw) (C.pack inp) >>= return
 
 cryptFile:: File -> Pass -> (Pass -> String -> IO String)-> IO File

@@ -6,6 +6,8 @@ module Lib
     ) where
 
 import           Control.Concurrent           (forkIO)
+import           Data.Time.Clock
+
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except   (ExceptT)
 import           Control.Monad.Trans.Resource
@@ -35,10 +37,10 @@ import           System.Log.Handler           (setFormatter)
 import           System.Log.Handler.Simple
 import           System.Log.Handler.Syslog
 import           System.Log.Logger
-import           System.Entropy
 import           Control.Concurrent
 import           CryptoAPI
 import           DatabaseAPI
+import           Data.Hashable
 
 encryptTicket :: Pass -> Pass -> Int -> IO Ticket
 encryptTicket serv_key sess timeout = encrypt serv_key $ sess ++ "\nTicket Valid For:" ++ (show timeout)
@@ -50,27 +52,27 @@ encrypToken ticket session server timeout pass  = do
   to   <- liftIO $ encrypt pass (show timeout)
   return $ Token ticket sess serv to
 
-getNewSession:: IO String
-getNewSession = do
-  session <- liftIO $ C.unpack <$> getEntropy 2048
+getNewSession:: String -> IO String
+getNewSession inp = do
+  session <- show <$> hash <$> (++) inp <$> show <$> getCurrentTime 
   return session
 
-buildNewToken :: Pass -> Key -> Handler Token
-buildNewToken passw server = do
-  sess <- liftIO $ getNewSession
-  (server_key :: (Maybe Key)) <- liftIO $ getPassw server serversDB 
+buildNewToken :: Key -> Pass -> Key -> Handler Token
+buildNewToken user passw server = do
+  liftIO $ warnLog $ "Building new token.."
+  sess <- liftIO $ getNewSession (user++server)
+  (server_key :: (Maybe Pass)) <-liftIO $ getPassw server serversDB
+  liftIO $ print server_key
   case server_key of
     Nothing -> throwError custom404Err
     (Just k) -> do
-                let timeout = 60*60
-                liftIO $ forkIO $ addSession sess timeout
+                let timeout = 1000*1000*1000*60*60
+                liftIO $ forkIO $ addSession sess sess (show timeout)
                 tick <- liftIO $ encryptTicket k sess timeout
                 liftIO $ (encrypToken tick sess server timeout passw) >>= return
 
 server :: Server SecurityAPI
-server = login :<|> registerUser
-
--- server = login :<|> getTicket:<|> registerUser :<|> deleteUser 
+server = login :<|> logOut :<|> getTicket :<|> registerUser :<|> deleteUser 
 -- ie get TGS token
 login :: AuthRequest -> Handler Token
 login (File log mes) =  do
@@ -78,41 +80,68 @@ login (File log mes) =  do
         (rec :: Maybe Pass) <- liftIO $ getPassw login usersDB 
         liftIO $ print rec
         case rec of
-          Just passw -> do
-            valid <- liftIO $ decrypt passw message
+          Just tgs_pass -> do
+            valid <- liftIO $ decrypt tgs_pass message
+            liftIO $ warnLog valid
             case (login == valid) of
-              True  -> buildNewToken tgs_id passw 
+              True  -> buildNewToken login tgs_pass tgs_id 
               False -> throwError custom401Err
           Nothing -> throwError custom403Err
+logOut :: Message -> Handler Message
+logOut (Message ticket) =  do
+        sess <- liftIO $ getSessionKey tgsKey (unpack ticket)
+        case sess of 
+          Nothing   -> throwError custom401Err
+          Just session -> do
+            liftIO $ deleteSession session 
+            resp <- liftIO $ encrypt session "Logged Out"
+            return $ Message (pack resp)
 getTicket :: AuthRequest -> Handler Token
 getTicket (File log mes) =  do
         let (ticket, encr_msg) = mapTuple unpack (log,mes)
-        req <- liftIO $ getSessionKey tgsKey ticket
-        case req of 
+        session <- liftIO $ getSessionKey tgsKey ticket
+        case session of 
           Nothing   -> throwError custom401Err
           Just sess -> do
-            server <- liftIO $ decrypt sess encr_msg
-            buildNewToken sess server
+            server_id <- liftIO $ decrypt sess encr_msg
+            buildNewToken ticket sess server_id
 
 registerUser :: AuthRequest -> Handler Message
-registerUser (File log mes) = liftIO $ do
+registerUser (File log mes) = do
   let (username, password) = mapTuple unpack (log,mes)
-  insertToDB username (Login username password) usersDB
-  return Message{content = "Success. You can now log in."}
+  liftIO $ insertToDB username (Login username password) usersDB
+  (users :: [Login]) <- liftIO $ getMultipleFromDB Nothing usersDB 
+  liftIO $ print users
+  return $ Message "Success. You can now log in."
 
-deleteUser :: Message -> Handler Message
-deleteUser msg = liftIO $ do
-  deleteFromDB (unpack (content msg)) usersDB
-  return Message {content = "Success. You have been deleted."}
+deleteUser :: AuthRequest -> Handler Message
+deleteUser (File usr tic) = do
+  let (username, ticket) = mapTuple unpack (usr,tic)
+  session <- liftIO $ getSessionKey tgsKey ticket
+  case session of
+    Nothing -> throwError custom401Err
+    Just sess -> do
+      liftIO $ deleteSession sess
+      user <- liftIO $ decrypt sess username
+      liftIO $ deleteFromDB user usersDB
+      (users :: [Login]) <- liftIO $ getMultipleFromDB Nothing usersDB 
+      liftIO $ print users
+      return $ Message "Success. You have been deleted."
 
 
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
   warnLog "Starting security-server."
-  deleteAllFromDB usersDB
+  deleteAllFromDB serversDB
   insertServers serverLogins serversDB
-  answ <- getPassw tgs_id serversDB 
+  (answ :: [Login]) <- getMultipleFromDB Nothing serversDB 
   print answ
+  (users :: [Login]) <- getMultipleFromDB Nothing usersDB 
+  print users
+  -- (one::Maybe Login) <- getFromDB tgs_id serversDB
+  -- print one
+  -- (two ::Maybe Pass) <- getPassw tgs_id serversDB
+  -- print two
   warnLog "Done."
   let settings = setPort 8080 $ setLogger aplogger defaultSettings
   runSettings settings app
@@ -132,7 +161,7 @@ api :: Proxy SecurityAPI
 api = Proxy
 
 usersDB    = "USERS"    ::Text
-serversDB  = "test"     ::Text
+serversDB  = "SERVERS"  ::Text
 userID     = "user"     ::Text
 serverID   = "server"   ::Text
 
@@ -148,7 +177,7 @@ trnKey = "trn_password" ::String
 
 
 
-insertServers logins db  = insertLoginsToDB ( DL.map (\ (x,y) -> (Login x y)) logins) db
+insertServers logins db  = insertLoginsToDB ( DL.map (\ (x,y) ->(Login x y)) logins) db
   
 serverLogins = [(tgs_id,tgsKey),
                ("FS1"::String,fs1Key),

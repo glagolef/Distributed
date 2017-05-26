@@ -32,15 +32,13 @@ dirApi = Proxy
 
 getDir :<|> addDir :<|> delDir = client dirApi
 
-
-
-
 login :: AuthRequest -> ClientM Token
+logout :: Message -> ClientM Message
 getTicket :: AuthRequest -> ClientM Token
 registerUser :: AuthRequest -> ClientM Message
-deleteUser :: Message -> ClientM Message
+deleteUser :: AuthRequest -> ClientM Message
 
-login :<|> getTicket :<|> registerUser :<|> deleteUser  = client authApi
+login :<|> logout :<|> getTicket :<|> registerUser :<|> deleteUser  = client authApi
 
 authApi:: Proxy SecurityAPI
 authApi = Proxy

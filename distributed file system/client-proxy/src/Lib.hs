@@ -8,18 +8,22 @@
 {-# LANGUAGE StandaloneDeriving   #-}
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-module Lib
-    ( run
-    ) where
+module Lib  where
+import Control.Concurrent           (forkIO)
 import Control.Monad.IO.Class
 import Data.Aeson
 import Data.List         as D 
 import Servant
+import Servant.API
+import Servant.Client
+import DistributedAPI
+import DistributedAPIClient
+import CryptoAPI
+import DatabaseAPI
 import Data.Proxy
 import GHC.Generics
 import Network.HTTP.Client hiding (Proxy)
-import Servant.API
-import Servant.Client
+import Data.Char
 import System.Directory 
 import Data.List.Split        as D           
 import System.IO.Error
@@ -30,11 +34,11 @@ import Web.HttpApiData
 import Control.Monad
 import Data.Text (pack, unpack)
 import qualified Data.Text.IO as T
-import DistributedAPI
-import DistributedAPIClient
+
+
 import Options.Applicative
 import System.Environment
-import CryptoAPI
+
 import qualified Data.ByteString.Char8    as C
 import           Git.Embed
 
@@ -51,12 +55,6 @@ getModTime fp True = do
   return (Just modTime)
 getModTime _ False = return Nothing
 
-queryOK::[String]->Bool
-queryOK ["open",_, mode] = elem mode ["-r","-a"] 
-queryOK ["delete", _]    = True
-queryOK _                = False
-
-
 makeRequest req = do
   manager <- newManager defaultManagerSettings
   request <- return $ req
@@ -64,27 +62,22 @@ makeRequest req = do
   return res
 
 
--- download :: EncrFile -> ClientM EncrMessage
--- upload   :: EncrFile -> ClientM EncrMessage
--- removeF   :: EncrMessage -> ClientM EncrMessage
-
--- (download :<|> upload :<|> removeF) = client api
-
--- api :: Proxy FileServerAPI
--- api = Proxy
-
 downloadRequest:: Maybe UTCTime -> FilePath -> Pass -> Ticket -> ClientM EncrMessage
-downloadRequest modTime newfp sess ticket = do 
+downloadRequest modTime newfp sess ticket = do
     let req = File (pack newfp) (pack (show modTime))
     encReq <- liftIO $ cryptFile req sess encrypt
     download (encReq, ticket) >>= return
 
 getFile:: [String] -> Maybe UTCTime -> FilePath -> FilePath -> String -> Pass -> Ticket-> IO Bool
 getFile (x:xs) modTime fp newfp div session ticket = do
-  print modTime
+  warnLog $ show modTime
   encResp <- makeRequest (downloadRequest modTime newfp session ticket)
   case encResp of
-    Left  err -> putStrLn ("Error: " ++ show err) >> return False
+    Left  err -> do
+      warnLog ("Error: " ++ show err)
+      again <- tryAgain
+      if again then getFile (x:xs) modTime fp newfp div session ticket
+        else return False
     Right (msg, ticket) -> do
         contents <- decryptMessage msg session
         if (contents == "304 Not Modified") then return True
@@ -103,14 +96,16 @@ uploadRequest fp fn sess tick =  do
 uploadFile:: FilePath -> FilePath -> Pass -> Ticket -> IO () 
 uploadFile fp fn sess tick = do
   encResp <- makeRequest (uploadRequest fp fn sess tick)
-  print encResp
   case encResp of
-    Left err -> putStrLn $ "Error: " ++ show err
+    Left err -> do
+      warnLog $ "Error: " ++ show err 
+      again <- tryAgain
+      when again $ uploadFile fp fn sess tick
     Right (msg, ticket) -> do
       contents <- decryptMessage msg sess
       warnLog $ contents
       -- tick==ticket
-      putStrLn $ "File uploaded: " ++ fn
+      warnLog $ "File uploaded: " ++ fn
 
 
 deleteRequest:: FilePath -> Pass -> Ticket -> ClientM EncrMessage
@@ -124,23 +119,19 @@ deleteFile:: FilePath -> FilePath -> Pass -> Ticket -> IO ()
 deleteFile fp fn sess ticket = do
   exists <- doesFileExist fp
   when exists $ do 
-        putStrLn ("Deleting "++ fn )
+        warnLog ("Deleting "++ fn )
         removeFile fp
   encResp <- makeRequest (deleteRequest fn sess ticket)
   case encResp of
-    Left err -> putStrLn $ "Error: " ++ show err
+    Left err -> do
+      warnLog $ "Error: " ++ show err
+      again <- tryAgain
+      if again then deleteFile fp fn sess ticket
+        else return ()
     Right (msg, ticket) -> do
       contents <- decryptMessage msg sess
       warnLog $ contents
-      putStrLn $ "File uploaded: " ++ fn
-
-
-
-
-
-
-
-
+      warnLog $ "File deleted: " ++ fn
 
 
 -- getDir :: EncrMessage -> ClientM EncrDirMessage
@@ -151,118 +142,37 @@ deleteFile fp fn sess ticket = do
 -- dirApi = Proxy
 
 -- getDir :<|> addDir :<|> delDir = client dirApi
+uploadIfModified:: FilePath -> UTCTime -> FilePath -> Session -> Ticket -> IO ()
+uploadIfModified fp mod fn sess tick = do
+ modified <- (==) mod <$> getModificationTime fp
+ if modified then do
+  warnLog $ fn ++ " was modified. Uploading..."
+  uploadFile fp fn sess tick 
+  else warnLog $ fn ++ " was not modified."
 
 
+getOpenMode:: String -> IOMode
+getOpenMode "-r"  = ReadMode
+getOpenMode "-w"  = WriteMode
+getOpenMode "-a"  = AppendMode
+getOpenMode "-rw" = ReadWriteMode
 
 
--- login :: AuthRequest -> ClientM Token
--- getTicket :: AuthRequest -> ClientM Token
--- registerUser :: AuthRequest -> ClientM Message
--- deleteUser :: Message -> ClientM Message
+fileCmdOK::[String]->Bool
+fileCmdOK ["open",_, mode] = elem mode ["-r","-a","-w"] 
+fileCmdOK ["delete", _]    = True
+fileCmdOK ["close", _]    =  True
+fileCmdOK _                = False
 
--- authApi:: Proxy SecurityAPI
--- authApi = Proxy
+tryAgain::IO (Bool)
+tryAgain = do
+   putStrLn "try again? y/n"
+   ans <- getLine
+   case (toUpper (head ans)) of
+    'Y' -> return True
+    'N' -> return False
+    _   -> tryAgain
 
-
-loginRequest:: Key -> Pass -> ClientM Token
-loginRequest usr psw = login (File (pack usr) (pack(psw))) >>= return
-
-registerRequest:: Key -> Pass -> ClientM Message
-registerRequest usr psw = registerUser (File (pack usr) (pack psw)) >>= return
-
-
-login :<|> registerUser = client authApi
--- login :<|> getTicket :<|> registerUser :<|> deleteUser  = client authApi
-
-
-makeQuery inp@(x:xs) ticket session = do
-  curDir <-getCurrentDirectory
-  let (div,fn) = case isInfixOf "\\" curDir of True  -> ("\\", (replace "/" "\\" (head xs)))
-                                               False -> ("\\", (replace "\\" "/" (head xs)))
-      fp =  (++) curDir (div ++ fn)
-  print fp
-  let newfp = getFilesDir fp div
-  print newfp
-  exists <- doesFileExist fp
-  modTime <- getModTime fp exists
-  case x of
-    "open"   -> do 
-      gotFile <- getFile inp modTime fp newfp div session ticket
-      run 
-    --   when gotFile $
-    --     case last xs of 
-    --   -- readF fp
-    --     "-r" -> readF fp
-    --     -- "-w" -> writeF fp newfp session ticket
-    --     "-a" -> appendF fp newfp session ticket
-    -- -- "write"  -> do
-    -- --   getFile inp modTime fp newfp div session ticket
-    -- --   writeF fp newfp
-    -- "delete" -> deleteFile fp newfp
-
-
-
-
-
-
-
-
-readF :: FilePath -> IO ()
-readF fp = do
-  contents <- readFile fp
-  print contents
-
-appendF::FilePath -> FilePath -> Pass -> Ticket -> IO ()
-appendF fp fn se ti = do
-  nextLine <- getLine
-  appendFile fp nextLine
-  uploadFile fp fn se ti
-
-writeF :: FilePath -> FilePath -> Pass -> Ticket -> IO ()
-writeF fp fn se ti = do
-  mt <- getModTime fp True
-  contents <- readFile fp
-  return contents
-  newmt <- getModTime fp True
-  if (mt/=newmt) 
-    then uploadFile fp fn se ti
-    else putStrLn "File Not Modified."
-
-run :: IO ()
-run = do
-     doLogin 
-  -- cmd <- words <$> getLine
-  -- if (queryOK cmd) then (run)
-  -- else putStrLn $ if (cmd /= [":q"]) then "Wrong Format." else "Bye."
-  -- when (cmd /= [":q"]) run
-
-doRegister:: String -> String -> IO ()
-doRegister user pass = do
-  (msg) <- makeRequest (registerRequest user pass)
-  case msg of
-    Left err -> putStrLn $ "Error: " ++ show err
-    Right (Message m) -> print m
-  
-
--- doLogin:: Maybe String -> Maybe String -> IO ()
-doLogin  = do
-  print  "Login\nUsername:"
-  username <- getLine
-  putStrLn "Password:"
-  password <- getLine
-  -- print [username,password]
-  -- doRegister username password
-
-  encrPass <- encrypt password username  
-  encrToken <- makeRequest (loginRequest username encrPass)
-  case encrToken of
-    Left err -> putStrLn $ "Error: " ++ show err
-    Right (k) -> do
-        decrypToken <- decrypToken k password 
-        print encrToken
-        print decrypToken
-
-  
 
 
 -- let's put all the hard work in a helper...
