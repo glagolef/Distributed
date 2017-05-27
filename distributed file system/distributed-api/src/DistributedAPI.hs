@@ -28,12 +28,16 @@ import           Control.Concurrent
 import           Data.Typeable
 import           System.Console.ANSI
 import           Language.Haskell.TH.Lib
+import           Data.Set 
+import qualified Data.Cache as M
 
 sessDB  = "SESSIONS"   :: Text
 sessID  = "sessID"     :: Text
 
-type DirectoryAPI = "getDir" :> ReqBody '[JSON] EncrMessage :> Get '[JSON] EncrDirMessage
+type DirectoryAPI = "listDirs" :> ReqBody '[JSON] EncrMessage :> Get '[JSON] Message
+               :<|> "getDir" :> ReqBody '[JSON] EncrMessage :> Get '[JSON] EncrDirMessage
                :<|> "addDir" :> ReqBody '[JSON] EncrDirMessage :> Put '[JSON] EncrMessage
+               :<|> "addDis" :> ReqBody '[JSON] EncrDirMessage :> Put '[JSON] EncrMessage
                :<|> "delDir" :> ReqBody '[JSON] EncrMessage :> Delete '[JSON] EncrMessage
 
 type FileServerAPI = "download" :> ReqBody '[JSON] EncrFile :> Get '[JSON] EncrMessage
@@ -46,7 +50,8 @@ type SecurityAPI = "login"     :> ReqBody '[JSON] AuthRequest :> Get '[JSON] Tok
               :<|> "register"  :> ReqBody '[JSON] AuthRequest :> Put '[JSON] Message
               :<|> "removeUser" :> ReqBody '[JSON] AuthRequest :> Delete '[JSON] Message
 
-type ModifiedHeader = Header "If-Modified-Since:" UTCTime
+-- type ModifiedHeader = Header "If-Modified-Since:" UTCTime
+type Sessions = M.Cache String (String,String,String,Int)
 
 type Key  = String
 type Pass = String
@@ -73,6 +78,7 @@ data Token = Token{ ticket      :: Ticket
                   } deriving (Generic, FromJSON, ToJSON, Show, Read) 
 
 data DirMessage = DirMessage { fileID :: String
+                             , sID    :: String
                              , sIP    :: String
                              , sPort  :: String
                              , sPath  :: String 
@@ -87,10 +93,18 @@ instance ToBSON   String
 mapTuple :: (a -> b) -> (a, a) -> (b, b)
 mapTuple f (a1, a2) = (f a1, f a2)
 
+
+isSingleton [x] = True
+isSingleton _ = False
+
+mkUniq :: Ord a => [a] -> [a]
+mkUniq = toList . fromList
+
 custom304Err= err304 { errBody = "304 NOT MODIFIED" }
 custom401Err= err401 { errBody = "401 UNAUTHORISED"}
 custom403Err= err403 { errBody = "403 NO SUCH USER"}
 custom404Err= err404 { errBody = "404 NOT FOUND" }
+
 
 
 -- | helper functions to change color in ansi terminal output (mor for the fun of it)

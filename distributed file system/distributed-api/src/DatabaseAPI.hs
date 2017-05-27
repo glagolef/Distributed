@@ -9,43 +9,50 @@ import qualified Data.List                          as DL
 import           Data.Maybe                         (catMaybes, isJust)
 import           Control.Monad.IO.Class             (liftIO)
 import           Control.Monad.Trans.Resource       (runResourceT)
-import           Data.Text                          hiding (find)
+import           Data.Text                          hiding (find,splitOn)
 import           Database.MongoDB
 import           Control.Concurrent                 (forkIO, threadDelay)
 import           Data.Char                          (isDigit)
 import           Data.Hashable
 import           CryptoAPI                          (decrypt)
 import           DistributedAPI
+import Data.List.Split(splitOn)
 
 getPassw:: Key -> Text -> IO (Maybe Pass) 
 getPassw key records = do
-    (login :: Maybe Login) <- getFromDB key records
+    (login :: Maybe Login) <- getFromDB key "key" records
     return $ maybe Nothing (\x-> Just(password x))login
 
-insertToDB :: (ToBSON t) => Key -> t -> Text -> IO ()
-insertToDB key value records = withMongoDbConnection $ do upsert (select ["key" =: key] records) $ toBSON value
+listDirectories:: Key -> Text -> IO [String]
+listDirectories dir db = do
+  (all_dirs::[DirMessage]) <- getMultipleFromDB Nothing "fileID" db
+  let func x = (&&) (DL.isPrefixOf dir x) (func2 x)
+      func2 x = isSingleton $ ((splitOn "/" x) DL.\\ (splitOn "/" dir)) DL.\\ [""] 
+  -- not $ DL.elem '/' (DL.init (x DL.\\ dir))
+  return $ mkUniq $ [(fileID x) DL.\\ dir | x <- all_dirs, func (fileID x)] 
 
-insertLoginsToDB :: [Login] -> Text -> IO ()
-insertLoginsToDB logins records = withMongoDbConnection $ do insertMany_ records $ DL.map toBSON logins
+insertToDB :: (ToBSON t) => Key -> Text -> t -> Text -> IO ()
+insertToDB key key_name value records = withMongoDbConnection $ do upsert (select [key_name =: key] records) $ toBSON value
 
-getFromDB :: (FromBSON t) => Key -> Text -> IO (Maybe t)
-getFromDB key records = do
+insertManyToDB ::(ToBSON t) => [t] -> Text -> IO ()
+insertManyToDB recs db = withMongoDbConnection $ do insertMany_ db $ DL.map toBSON recs
+
+getFromDB :: (FromBSON t) => Key -> Text -> Text -> IO (Maybe t)
+getFromDB key key_name records = do
       withMongoDbConnection $ do
-        vals <- findOne (select ["key" =: key] records)
-        -- return $ DL.head $ catMaybes $ DL.map (\b -> fromBSON b) vals
+        vals <- findOne (select [key_name =: key] records)
         return $ maybe Nothing fromBSON vals
 
-getMultipleFromDB :: (FromBSON t) => (Maybe Key) -> Text -> IO [t]
-getMultipleFromDB key records  = do
+getMultipleFromDB :: (FromBSON t) => (Maybe Key) -> Text -> Text -> IO [t]
+getMultipleFromDB key key_name records  = do
       withMongoDbConnection $ do
         vals <- case key of
-          Just k -> find (select ["key" =: key] records) >>= drainCursor
+          Just k -> find (select [key_name =: key] records) >>= drainCursor
           Nothing -> find (select [] records) >>= drainCursor
-        -- vals <- find (select ["key" =: key] records) >>= drainCursor
         return $ catMaybes $ DL.map (\b -> fromBSON b) vals
             
-deleteFromDB :: Key -> Text -> IO ()
-deleteFromDB record db = withMongoDbConnection $ delete (select ["key" =:  record] db)
+deleteFromDB :: Key -> Text -> Text -> IO ()
+deleteFromDB record key_name db = withMongoDbConnection $ delete (select [key_name =:  record] db)
 
 deleteAllFromDB :: Text -> IO ()
 deleteAllFromDB db = withMongoDbConnection $ delete (select [] db)
@@ -73,20 +80,20 @@ getSessionKey passw inp = do
 
 isValidSess:: Key -> IO Bool
 isValidSess key = do
-        (passw ::(Maybe Key)) <- getFromDB key sessDB
+        (passw ::(Maybe Key)) <- getFromDB key "key" sessDB
         return (isJust passw)
 
 addSession:: Key-> Pass -> String -> IO ()
 addSession key session timeout = do
   warnLog $ "Session valid for " ++ (show ((read timeout) `div` (1000*1000*60))) ++ " minutes."
-  insertToDB key session sessDB
+  insertToDB key "key" session sessDB
   threadDelay (read timeout)
   deleteSession key
 
 
 deleteSession :: Pass -> IO ()
 deleteSession session = do
-  deleteFromDB session sessDB
+  deleteFromDB session "key" sessDB
   warnLog $"Session expired."
 
 withMongoDbConnection :: Action IO a -> IO a

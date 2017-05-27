@@ -40,6 +40,7 @@ library
                      , http-api-data
                      , distributed-api
                      , cryptocipher
+                     , split
 
   default-language:    Haskell2010
 

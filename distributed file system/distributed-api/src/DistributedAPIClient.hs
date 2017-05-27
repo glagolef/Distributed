@@ -23,14 +23,16 @@ removeF   :: EncrMessage -> ClientM EncrMessage
 api :: Proxy FileServerAPI
 api = Proxy
 
+listDirs :: EncrMessage -> ClientM Message
 getDir :: EncrMessage -> ClientM EncrDirMessage
 addDir :: EncrDirMessage -> ClientM EncrMessage
+addDirs :: EncrDirMessage -> ClientM EncrMessage
 delDir :: EncrMessage -> ClientM EncrMessage
 
 dirApi :: Proxy DirectoryAPI
 dirApi = Proxy
 
-getDir :<|> addDir :<|> delDir = client dirApi
+listDirs :<|> getDir :<|> addDir :<|> addDirs :<|> delDir = client dirApi
 
 login :: AuthRequest -> ClientM Token
 logout :: Message -> ClientM Message

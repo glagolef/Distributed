@@ -32,7 +32,6 @@ import           Network.Wai.Handler.Warp
 import           Network.Wai.Logger
 import           Servant
 import           Servant.API                  
--- import           Servant.Client            
 import           Servant.Utils.StaticFiles   
 import           Servant.Server                       
 import           System.Directory             
@@ -46,6 +45,7 @@ import           Web.HttpApiData
 import           DistributedAPI
 import           CryptoAPI
 import           DatabaseAPI (getSessionKey)
+
 getModTime:: FilePath -> Bool -> IO (Maybe UTCTime)
 getModTime fp True = liftIO $ do 
   modTime <- getModificationTime fp
@@ -56,8 +56,8 @@ isModified:: Maybe UTCTime -> Maybe UTCTime -> Bool
 isModified (Just ct) (Just st) = (>10) $ diffUTCTime st ct
 isModified Nothing (Just t1) = True
 
-server :: Server FileServerAPI
-server = downloadFile
+server :: FilePath -> Server FileServerAPI
+server homeDir = downloadFile
     :<|> uploadFile
     :<|> deleteFile 
    where
@@ -71,7 +71,7 @@ server = downloadFile
            let (path,cont) =  (unpack p, read (unpack fc) :: Maybe UTCTime) 
            liftIO $ warnLog $ "Message Path: "     ++  path  
            liftIO $ warnLog $ "Message Contents: " ++  (show cont)
-           fp <- liftIO $ (\y-> (++) y ("\\" ++ path)) <$> getCurrentDirectory
+           let fp = fp ++ path
            liftIO $ print fp
            exists <- liftIO (doesFileExist fp)
            isMod<- case cont of
@@ -99,7 +99,7 @@ server = downloadFile
            let path =  unpack p
            liftIO $ warnLog $ "Message Path: "     ++  path  
            liftIO $ warnLog $ "Message Contents: " ++  (show fc)
-           fp <- liftIO $ (\y-> (++) y ("\\" ++ path)) <$> getCurrentDirectory
+           let fp = homeDir ++ path
            liftIO $ warnLog $ "Writing to File: "     ++  path  
            liftIO $ writeFile fp (fc)
            encrFile <- liftIO $ encryptMessage (Message (pack "200 Great Success")) sess
@@ -124,7 +124,7 @@ server = downloadFile
 
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
-  warnLog "Starting dir-server."
+  warnLog "Starting fs1-server."
   let settings = setPort 8085 $ setLogger aplogger defaultSettings
   runSettings settings app
 
@@ -137,3 +137,4 @@ api = Proxy
 fsKey = "fs1_password" ::String
 -- fs2Key = "fs2_password" ::String
 -- fs3Key = "fs3_password" ::String
+

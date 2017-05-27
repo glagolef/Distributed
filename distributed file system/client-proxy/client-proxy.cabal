@@ -43,6 +43,7 @@ library
                      , optparse-applicative
                      , Cabal
                      , ansi-terminal
+                     , cache
 
   default-language:    Haskell2010
 
@@ -54,6 +55,7 @@ executable client-proxy-exe
                      , directory
                      , client-proxy
                      , distributed-api
+                     , cache
   default-language:    Haskell2010
 
 test-suite client-proxy-test

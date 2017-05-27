@@ -32,17 +32,16 @@ import Data.Time.Clock
 import System.IO
 import Web.HttpApiData
 import Control.Monad
-import Data.Text (pack, unpack)
-import qualified Data.Text.IO as T
-
-
+import Data.Text (pack, unpack) 
+import qualified Data.Text.IO as T 
 import Options.Applicative
 import System.Environment
-
 import qualified Data.ByteString.Char8    as C
-import           Git.Embed
-
+import Git.Embed
+import qualified Data.Cache as M
+-- import AuthLib (getTicket)
 replace old new = intercalate new . splitOn old
+
 
 getFilesDir:: FilePath -> String -> FilePath
 getFilesDir dir div = dir \\ (result ++ div ++ "files" ++ div)
@@ -50,12 +49,13 @@ getFilesDir dir div = dir \\ (result ++ div ++ "files" ++ div)
         cut = takeWhile (/="files") wds
         result = replace " " div $ unwords cut
 
+getModTime :: FilePath -> Bool -> IO (Maybe UTCTime)
+getModTime _ False = return Nothing
 getModTime fp True = do 
   modTime <- getModificationTime fp
   return (Just modTime)
-getModTime _ False = return Nothing
 
-makeRequest req = do
+makeRequest req ip port = do
   manager <- newManager defaultManagerSettings
   request <- return $ req
   res <- runClientM request (ClientEnv manager (BaseUrl Http "localhost" 8080 ""))
@@ -68,15 +68,15 @@ downloadRequest modTime newfp sess ticket = do
     encReq <- liftIO $ cryptFile req sess encrypt
     download (encReq, ticket) >>= return
 
-getFile:: [String] -> Maybe UTCTime -> FilePath -> FilePath -> String -> Pass -> Ticket-> IO Bool
-getFile (x:xs) modTime fp newfp div session ticket = do
-  warnLog $ show modTime
-  encResp <- makeRequest (downloadRequest modTime newfp session ticket)
+getFile:: [String] -> Maybe UTCTime -> FilePath -> FilePath -> String -> (Pass,Ticket,String,Int)-> IO Bool
+getFile (x:xs) modTime fp newfp div (session,ticket,ip,port) = do
+  -- print modTime
+  encResp <- makeRequest (downloadRequest modTime newfp session ticket) ip port
   case encResp of
     Left  err -> do
       warnLog ("Error: " ++ show err)
       again <- tryAgain
-      if again then getFile (x:xs) modTime fp newfp div session ticket
+      if again then getFile (x:xs) modTime fp newfp div (session,ticket,ip,port)
         else return False
     Right (msg, ticket) -> do
         contents <- decryptMessage msg session
@@ -93,19 +93,18 @@ uploadRequest fp fn sess tick =  do
     encReq <- liftIO $ cryptFile req sess encrypt
     upload (encReq, tick) >>= return 
 
-uploadFile:: FilePath -> FilePath -> Pass -> Ticket -> IO () 
-uploadFile fp fn sess tick = do
-  encResp <- makeRequest (uploadRequest fp fn sess tick)
+uploadFile:: FilePath -> FilePath -> (Pass,Ticket,String,Int) -> IO () 
+uploadFile fp fn (sess,tick,ip,port) = do
+  encResp <- makeRequest (uploadRequest fp fn sess tick) ip port
   case encResp of
     Left err -> do
       warnLog $ "Error: " ++ show err 
       again <- tryAgain
-      when again $ uploadFile fp fn sess tick
+      when again $ uploadFile fp fn (sess,tick,ip,port)
     Right (msg, ticket) -> do
       contents <- decryptMessage msg sess
-      warnLog $ contents
-      -- tick==ticket
-      warnLog $ "File uploaded: " ++ fn
+      print $ contents
+      print $ "File uploaded: " ++ fn
 
 
 deleteRequest:: FilePath -> Pass -> Ticket -> ClientM EncrMessage
@@ -115,41 +114,31 @@ deleteRequest fn sess ticket = do
     removeF (encReq, ticket) >>= return
 
 
-deleteFile:: FilePath -> FilePath -> Pass -> Ticket -> IO ()
-deleteFile fp fn sess ticket = do
+deleteFile:: FilePath -> FilePath -> (Pass,Ticket,String,Int) -> IO ()
+deleteFile fp fn (sess,ticket,ip,port) = do
   exists <- doesFileExist fp
   when exists $ do 
-        warnLog ("Deleting "++ fn )
+        print ("Deleting "++ fn )
         removeFile fp
-  encResp <- makeRequest (deleteRequest fn sess ticket)
+  encResp <- makeRequest (deleteRequest fn sess ticket) ip port
   case encResp of
     Left err -> do
       warnLog $ "Error: " ++ show err
       again <- tryAgain
-      if again then deleteFile fp fn sess ticket
+      if again then deleteFile fp fn (sess,ticket,ip,port)
         else return ()
     Right (msg, ticket) -> do
       contents <- decryptMessage msg sess
-      warnLog $ contents
-      warnLog $ "File deleted: " ++ fn
+      print $ contents
+      print $ "File deleted: " ++ fn
 
-
--- getDir :: EncrMessage -> ClientM EncrDirMessage
--- addDir :: EncrDirMessage -> ClientM EncrMessage
--- delDir :: EncrMessage -> ClientM EncrMessage
-
--- dirApi :: Proxy DirectoryAPI
--- dirApi = Proxy
-
--- getDir :<|> addDir :<|> delDir = client dirApi
-uploadIfModified:: FilePath -> UTCTime -> FilePath -> Session -> Ticket -> IO ()
-uploadIfModified fp mod fn sess tick = do
+uploadIfModified:: FilePath -> UTCTime -> FilePath -> (Pass,Ticket,String,Int) -> IO ()
+uploadIfModified fp mod fn conn = do
  modified <- (==) mod <$> getModificationTime fp
  if modified then do
-  warnLog $ fn ++ " was modified. Uploading..."
-  uploadFile fp fn sess tick 
-  else warnLog $ fn ++ " was not modified."
-
+  print $ fn ++ " was modified. Uploading..."
+  uploadFile fp fn conn 
+  else print $ fn ++ " was not modified."
 
 getOpenMode:: String -> IOMode
 getOpenMode "-r"  = ReadMode
@@ -172,6 +161,73 @@ tryAgain = do
     'Y' -> return True
     'N' -> return False
     _   -> tryAgain
+
+
+
+
+
+listDirsRequest dir ticket = listDirs ((Message (pack dir)), ticket) >>= return
+
+authIP = "localhost"
+authPort = 8080
+
+getDirSess cache = do
+  getSess <- M.lookup cache "DIR"
+  ses <- case getSess of
+    Just s -> return s
+    Nothing -> do
+      tgs <- M.lookup cache "TGS"
+      case tgs of
+        Nothing -> return ("","","",0) 
+        Just (session,ticket,ip,port) -> do
+          token <- doGetTicket "DIR" session ticket ip port
+          case token of
+            Just (Token tick sess server_id timeout) -> do
+              -- theCache <- M.setDefaultExpiration cache $ Just $ read timeout
+              let [_,i,p] = D.splitOn "," server_id
+              M.insert cache "DIR" (sess,tick,i,(read p))
+              return (sess,tick,i,(read p))
+            Nothing -> putStrLn "Something went wrong.">>return ("","","",0)
+  return ses
+
+
+getTicketRequest:: Key -> Pass -> ClientM Token
+getTicketRequest server ticket = getTicket (File (pack server) (pack ticket)) >>= return
+
+doGetTicket :: Key -> (Pass,Ticket,String,Int) -> IO (Maybe Token)
+doGetTicket server (session,ticket,ip,port) = do
+  encrReq <- encrypt session server
+  encrToken <- makeRequest (getTicketRequest encrReq ticket) ip port
+  case encrToken of
+    Left err -> putStrLn ("Error: " ++ show err) >> return Nothing
+    Right (t) -> do
+        serverToken <- decrypToken t session 
+        print serverToken
+        return $ Just serverToken
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

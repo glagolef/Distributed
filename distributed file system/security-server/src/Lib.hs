@@ -109,8 +109,8 @@ getTicket (File log mes) =  do
 registerUser :: AuthRequest -> Handler Message
 registerUser (File log mes) = do
   let (username, password) = mapTuple unpack (log,mes)
-  liftIO $ insertToDB username (Login username password) usersDB
-  (users :: [Login]) <- liftIO $ getMultipleFromDB Nothing usersDB 
+  liftIO $ insertToDB username "key" (Login username password) usersDB
+  (users :: [Login]) <- liftIO $ getMultipleFromDB Nothing "key" usersDB 
   liftIO $ print users
   return $ Message "Success. You can now log in."
 
@@ -123,8 +123,8 @@ deleteUser (File usr tic) = do
     Just sess -> do
       liftIO $ deleteSession sess
       user <- liftIO $ decrypt sess username
-      liftIO $ deleteFromDB user usersDB
-      (users :: [Login]) <- liftIO $ getMultipleFromDB Nothing usersDB 
+      liftIO $ deleteFromDB user "key" usersDB
+      (users :: [Login]) <- liftIO $ getMultipleFromDB Nothing "key" usersDB 
       liftIO $ print users
       return $ Message "Success. You have been deleted."
 
@@ -134,9 +134,9 @@ startApp = withLogging $ \ aplogger -> do
   warnLog "Starting security-server."
   deleteAllFromDB serversDB
   insertServers serverLogins serversDB
-  (answ :: [Login]) <- getMultipleFromDB Nothing serversDB 
+  (answ :: [Login]) <- getMultipleFromDB Nothing "key" serversDB 
   print answ
-  (users :: [Login]) <- getMultipleFromDB Nothing usersDB 
+  (users :: [Login]) <- getMultipleFromDB Nothing "key" usersDB 
   print users
   -- (one::Maybe Login) <- getFromDB tgs_id serversDB
   -- print one
@@ -147,12 +147,6 @@ startApp = withLogging $ \ aplogger -> do
   runSettings settings app
     -- Nothing -> warnLog "Something went wrong." >> startApp
                
-
-
-
-
-
-
 
 app :: Application
 app = serve api server
@@ -175,9 +169,7 @@ dirKey = "dir_password" ::String
 locKey = "loc_password" ::String
 trnKey = "trn_password" ::String
 
-
-
-insertServers logins db  = insertLoginsToDB ( DL.map (\ (x,y) ->(Login x y)) logins) db
+insertServers logins db  = insertManyToDB ( DL.map (\ (x,y) ->(Login x y)) logins) db
   
 serverLogins = [(tgs_id,tgsKey),
                ("FS1"::String,fs1Key),

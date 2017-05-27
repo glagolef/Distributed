@@ -7,6 +7,8 @@ import DistributedAPI
 import DistributedAPIClient
 import Control.Monad
 import Data.List
+import qualified Data.Cache as M
+
 main :: IO ()
 main = do
 	  setCurrentDirectory "./files"
@@ -20,23 +22,27 @@ entryMenu = do
   "1"->  do
     loggedIn <- doLogin
     case loggedIn of
-      Just (username,tgsToken) -> printHelp >> loggedInMenu username tgsToken
+      Just (username,tgsToken@(Token ticket session _ timeout)) -> do
+        sessions <- M.newCache (read timeout)
+        M.insert sessions "TGS" (session,ticket,authIP,authPort)
+        printHelp 
+        loggedInMenu username tgsToken sessions
       Nothing -> entryMenu
   "2"-> doRegister >> entryMenu
   "3"-> quitMessage
   _ -> print "No such option" >> entryMenu
 
-loggedInMenu:: Key -> Token -> IO ()
-loggedInMenu username tgsToken@(Token ticket session _ _) = do
+loggedInMenu:: Key -> Token -> Sessions -> IO ()
+loggedInMenu username tgsToken@(Token ticket session _ _) sessions = do
   choice <- getLine
   case choice of
-   "help"   -> printHelp
+   "help"   -> printHelp >> entryMenu
    "logout" -> doLogout session ticket >> entryMenu
    "unregister" -> doUnregister username session ticket >> entryMenu
    "quit" -> doLogout session ticket >> quitMessage
    _   -> do
      let cmd = words choice
-         goBack = loggedInMenu username tgsToken
+         goBack = loggedInMenu username tgsToken sessions
      if (fileCmdOK cmd) then makeQuery cmd ticket session goBack
      else putStrLn "Wrong Format." >> goBack
 
@@ -92,3 +98,18 @@ printHelp:: IO ()
 printHelp = putStrLn $ "1. logout\n2. unregister\n3. ls \n4. cd path/to/file"
                    ++ "\n5. open path/to/file -r/-w/-a \n6. read path/to/file"
                    ++ "\n7. write path/to/file contents \n8. quit \n9. help "
+
+
+
+doLS cache dir = do
+  M.purgeExpired cache
+  (sess,tick,ip,port) <-getDirSess cache
+  case sess of
+    "" -> putStrLn "Session expired.">>quitMessage>>entryMenu
+    _ -> do
+      msg <- makeRequest (listDirsRequest dir tick) ip port
+      case msg of
+        Left err -> putStrLn $ "Error: " ++ show err
+        Right (Message encrM) -> do
+          decrM <- splitOn "," <$> decrypt sess (unpack encrM)
+          print decrM

@@ -44,20 +44,13 @@ import System.Environment
 import qualified Data.ByteString.Char8    as C
 import           Git.Embed
 
--- login :: AuthRequest -> ClientM Token
--- logout :: Message -> ClientM Message
--- getTicket :: AuthRequest -> ClientM Token
--- registerUser :: AuthRequest -> ClientM Message
--- deleteUser :: AuthRequest -> ClientM Message
-
 loginRequest:: Key -> Pass -> ClientM Token
 loginRequest usr psw = login (File (pack usr) (pack psw)) >>= return
 
 logoutRequest:: Ticket -> ClientM Message
 logoutRequest ticket = logout (Message (pack ticket)) >>= return
 
-getTicketRequest:: Key -> Pass -> ClientM Token
-getTicketRequest server ticket = getTicket (File (pack server) (pack ticket)) >>= return
+
 
 registerRequest:: Key -> Pass -> ClientM Message
 registerRequest usr psw = registerUser (File (pack usr) (pack psw)) >>= return
@@ -65,12 +58,12 @@ registerRequest usr psw = registerUser (File (pack usr) (pack psw)) >>= return
 deleteUserRequest:: Key -> Ticket -> ClientM Message
 deleteUserRequest usr ticket = deleteUser (File (pack usr) (pack ticket)) >>= return
 
-doLogin:: IO (Maybe (Key,Token))
-doLogin = do
+doLogin:: String -> Int -> IO (Maybe (Key,Token))
+doLogin ip port = do
   (username,password) <- userDetailsIn False
   print [username,password]
   encrPass <- encrypt password username  
-  encrToken <- makeRequest (loginRequest username encrPass)
+  encrToken <- makeRequest (loginRequest username encrPass) ip port
   case encrToken of
     Left err -> putStrLn ( "Error: " ++ show err) >> return Nothing
     Right (k) -> do
@@ -80,36 +73,28 @@ doLogin = do
         forkIO $ addSession serv sess to
         return $ Just (username, tgsToken)
 
-doLogout :: Pass -> Ticket -> IO ()
-doLogout session ticket = do
-    msg <- makeRequest (logoutRequest ticket)
+doLogout :: (Pass,Ticket,String,Int) -> IO ()
+doLogout (session,ticket,ip,port) = do
+    msg <- makeRequest (logoutRequest ticket) ip port
     case msg of
       Left err -> putStrLn $ "Error: " ++ show err
       Right (Message encrM) -> do
         decrM <- decrypt session (unpack encrM)
         print decrM
-doRegister:: IO ()
-doRegister = do
+doRegister:: String -> Int -> IO ()
+doRegister ip port = do
   (user,pass) <- userDetailsIn True
-  (msg) <- makeRequest (registerRequest user pass)
+  (msg) <- makeRequest (registerRequest user pass) ip port
   case msg of
     Left err -> putStrLn $ "Error: " ++ show err
     Right (Message m) -> print m
-doGetTicket :: Key -> Pass -> Ticket -> IO (Maybe Token)
-doGetTicket server session ticket = do
-  encrReq <- encrypt session server
-  encrToken <- makeRequest (getTicketRequest encrReq ticket)
-  case encrToken of
-    Left err -> putStrLn ("Error: " ++ show err) >> return Nothing
-    Right (t) -> do
-        serverToken <- decrypToken t session 
-        print serverToken
-        return $ Just serverToken
 
-doUnregister :: Key -> Pass -> Ticket -> IO ()
-doUnregister username session ticket = do
+
+
+doUnregister :: Key -> (Pass,Ticket,String,Int) -> IO ()
+doUnregister username (session,ticket,ip,port) = do
    encrReq <- encrypt session username
-   encrResp <- makeRequest (deleteUserRequest encrReq ticket)
+   encrResp <- makeRequest (deleteUserRequest encrReq ticket) ip port
    case encrResp of
     Left err -> putStrLn $ "Error: " ++ show err
     Right (Message m) -> do
