@@ -21,7 +21,6 @@ import DistributedAPI
 import DistributedAPIClient
 import CryptoAPI
 import DatabaseAPI
-import Lib (makeRequest)
 import Data.Proxy
 import GHC.Generics
 import Network.HTTP.Client hiding (Proxy)
@@ -50,8 +49,6 @@ loginRequest usr psw = login (File (pack usr) (pack psw)) >>= return
 logoutRequest:: Ticket -> ClientM Message
 logoutRequest ticket = logout (Message (pack ticket)) >>= return
 
-
-
 registerRequest:: Key -> Pass -> ClientM Message
 registerRequest usr psw = registerUser (File (pack usr) (pack psw)) >>= return
 
@@ -70,7 +67,6 @@ doLogin ip port = do
         tgsToken@(Token ticket sess serv to) <- decrypToken k password 
         -- print tgsToken
         warnLog $ "Welcome " ++ username
-        forkIO $ addSession serv sess to
         return $ Just (username, tgsToken)
 
 doLogout :: (Pass,Ticket,String,Int) -> IO ()

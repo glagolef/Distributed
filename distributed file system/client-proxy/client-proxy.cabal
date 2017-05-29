@@ -44,6 +44,7 @@ library
                      , Cabal
                      , ansi-terminal
                      , cache
+                     , clock
 
   default-language:    Haskell2010
 
@@ -56,6 +57,7 @@ executable client-proxy-exe
                      , client-proxy
                      , distributed-api
                      , cache
+                     , text
   default-language:    Haskell2010
 
 test-suite client-proxy-test

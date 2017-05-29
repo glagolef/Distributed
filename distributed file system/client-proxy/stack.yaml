@@ -8,6 +8,8 @@ extra-deps:
 - servant-server-0.10
 - crypto-simple-0.1.0.0
 - git-embed-0.1.0
+- suspend-0.2.0.0
+
 resolver: lts-7.9
 flags: {}
 extra-package-dbs: []

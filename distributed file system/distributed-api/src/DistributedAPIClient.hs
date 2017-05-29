@@ -14,9 +14,9 @@ import           DistributedAPI
 import           Data.Time.Clock              (UTCTime)
 
 
-download :: EncrFile -> ClientM EncrMessage
-upload   :: EncrFile -> ClientM EncrMessage
-removeF   :: EncrMessage -> ClientM EncrMessage
+download :: EncrFile -> ClientM Message
+upload   :: EncrFile -> ClientM Message
+removeF   :: EncrMessage -> ClientM Message
 
 (download :<|> upload :<|> removeF) = client api
 
@@ -24,10 +24,10 @@ api :: Proxy FileServerAPI
 api = Proxy
 
 listDirs :: EncrMessage -> ClientM Message
-getDir :: EncrMessage -> ClientM EncrDirMessage
-addDir :: EncrDirMessage -> ClientM EncrMessage
-addDirs :: EncrDirMessage -> ClientM EncrMessage
-delDir :: EncrMessage -> ClientM EncrMessage
+getDir :: EncrMessage -> ClientM DirMessage
+addDir :: EncrDirMessage -> ClientM Message
+addDirs :: EncrDirMessage -> ClientM Message
+delDir :: EncrMessage -> ClientM Message
 
 dirApi :: Proxy DirectoryAPI
 dirApi = Proxy
@@ -44,3 +44,27 @@ login :<|> logout :<|> getTicket :<|> registerUser :<|> deleteUser  = client aut
 
 authApi:: Proxy SecurityAPI
 authApi = Proxy
+
+getLock :: EncrMessage -> ClientM Message
+releaseLock :: EncrMessage -> ClientM Message
+addLock :: EncrMessage -> ClientM Message
+deleteLock :: EncrMessage -> ClientM Message
+
+
+
+getLock :<|> releaseLock :<|> addLock :<|> deleteLock = client lockApi
+
+lockApi:: Proxy LockAPI
+lockApi = Proxy
+
+authIP = "localhost"
+authPort = 8080 ::Int
+
+dirIP = "localhost"
+dirPort = 8090 ::Int
+
+locIP = "localhost"
+locPort = 8082 ::Int
+
+transIP = "localhost"
+transPort = 8083 ::Int

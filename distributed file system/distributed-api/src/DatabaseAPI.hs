@@ -11,12 +11,14 @@ import           Control.Monad.IO.Class             (liftIO)
 import           Control.Monad.Trans.Resource       (runResourceT)
 import           Data.Text                          hiding (find,splitOn)
 import           Database.MongoDB
-import           Control.Concurrent                 (forkIO, threadDelay)
+import           Control.Concurrent                 (forkIO)
 import           Data.Char                          (isDigit)
 import           Data.Hashable
 import           CryptoAPI                          (decrypt)
 import           DistributedAPI
 import Data.List.Split(splitOn)
+import Control.Concurrent.Suspend
+
 
 getPassw:: Key -> Text -> IO (Maybe Pass) 
 getPassw key records = do
@@ -28,7 +30,6 @@ listDirectories dir db = do
   (all_dirs::[DirMessage]) <- getMultipleFromDB Nothing "fileID" db
   let func x = (&&) (DL.isPrefixOf dir x) (func2 x)
       func2 x = isSingleton $ ((splitOn "/" x) DL.\\ (splitOn "/" dir)) DL.\\ [""] 
-  -- not $ DL.elem '/' (DL.init (x DL.\\ dir))
   return $ mkUniq $ [(fileID x) DL.\\ dir | x <- all_dirs, func (fileID x)] 
 
 insertToDB :: (ToBSON t) => Key -> Text -> t -> Text -> IO ()
@@ -61,7 +62,6 @@ getSessionKey :: Pass -> String -> IO (Maybe Pass)
 getSessionKey passw inp = do
   warnLog "Decrypting ticket...."
   answ <- decrypt passw inp
-  warnLog answ
   case (DL.isInfixOf "Ticket Valid For:" answ) of
     False -> return Nothing
     True  -> do
@@ -85,11 +85,10 @@ isValidSess key = do
 
 addSession:: Key-> Pass -> String -> IO ()
 addSession key session timeout = do
-  warnLog $ "Session valid for " ++ (show ((read timeout) `div` (1000*1000*60))) ++ " minutes."
+  warnLog $ "Session valid for " ++ (show ((read timeout) `div` 60)) ++ " minutes."
   insertToDB key "key" session sessDB
-  threadDelay (read timeout)
+  suspend $ mDelay (read timeout)
   deleteSession key
-
 
 deleteSession :: Pass -> IO ()
 deleteSession session = do

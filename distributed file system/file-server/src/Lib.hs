@@ -45,6 +45,8 @@ import           Web.HttpApiData
 import           DistributedAPI
 import           CryptoAPI
 import           DatabaseAPI (getSessionKey)
+-- import           Control.Concurrent.STM
+-- import qualified Data.Cache as M
 
 getModTime:: FilePath -> Bool -> IO (Maybe UTCTime)
 getModTime fp True = liftIO $ do 
@@ -56,12 +58,12 @@ isModified:: Maybe UTCTime -> Maybe UTCTime -> Bool
 isModified (Just ct) (Just st) = (>10) $ diffUTCTime st ct
 isModified Nothing (Just t1) = True
 
-server :: FilePath -> Server FileServerAPI
-server homeDir = downloadFile
+server :: Server FileServerAPI
+server = downloadFile
     :<|> uploadFile
     :<|> deleteFile 
-   where
-      downloadFile :: EncrFile -> Handler EncrMessage
+    where
+      downloadFile :: EncrFile -> Handler Message
       downloadFile (msg, ticket) = do
         session <- liftIO $ getSessionKey fsKey ticket
         case session of
@@ -84,12 +86,12 @@ server homeDir = downloadFile
               (True,True)    -> do
                 getFile  <- liftIO $ readFile fp
                 encrFile <- liftIO $ encryptMessage (Message getFile) sess
-                return (encrFile, ticket)
+                return encrFile
               (True, False)  -> do
                 encrFile <- liftIO $ encryptMessage (Message (pack "304 Not Modified")) sess
-                return (encrFile, ticket)
+                return encrFile
               _              -> throwError custom404Err                 
-      uploadFile:: EncrFile -> Handler EncrMessage
+      uploadFile:: EncrFile -> Handler Message
       uploadFile (msg, ticket) = do
         session <- liftIO $ getSessionKey fsKey ticket
         case session of
@@ -97,14 +99,14 @@ server homeDir = downloadFile
           Just sess -> do
            (File p fc) <- liftIO $ cryptFile msg sess decrypt
            let path =  unpack p
-           liftIO $ warnLog $ "Message Path: "     ++  path  
-           liftIO $ warnLog $ "Message Contents: " ++  (show fc)
+           -- liftIO $ warnLog $ "Message Path: "     ++  path  
+           -- liftIO $ warnLog $ "Message Contents: " ++  (show fc)
            let fp = homeDir ++ path
-           liftIO $ warnLog $ "Writing to File: "     ++  path  
+           liftIO $ warnLog $ "Writing to File: "     ++  path
            liftIO $ writeFile fp (fc)
-           encrFile <- liftIO $ encryptMessage (Message (pack "200 Great Success")) sess
-           return (encrFile, ticket)
-      deleteFile:: EncrMessage -> Handler EncrMessage
+           encrFile <- liftIO $ encryptMessage (Message (pack "200 Great Addition")) sess
+           return encrFile
+      deleteFile:: EncrMessage -> Handler Message
       deleteFile (msg, ticket) = do
         session <- liftIO $ getSessionKey fsKey ticket
         case session of
@@ -118,7 +120,7 @@ server homeDir = downloadFile
                 liftIO $ warnLog ("Deleting File : " ++ fp )
                 liftIO $ removeFile fp
                 encrFile <- liftIO $ encryptMessage (Message (pack "200 Great Deletion")) sess
-                return (encrFile, ticket)
+                return encrFile
               False ->  throwError custom404Err    
 
 
@@ -126,7 +128,7 @@ startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
   warnLog "Starting fs1-server."
   let settings = setPort 8085 $ setLogger aplogger defaultSettings
-  runSettings settings app
+  runSettings settings app 
 
 app :: Application
 app = serve api server
@@ -135,6 +137,7 @@ api :: Proxy FileServerAPI
 api = Proxy
 
 fsKey = "fs1_password" ::String
--- fs2Key = "fs2_password" ::String
--- fs3Key = "fs3_password" ::String
+fs2Key = "fs2_password" ::String
+fs3Key = "fs3_password" ::String
+homeDir = "./files"
 

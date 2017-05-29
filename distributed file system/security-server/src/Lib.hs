@@ -40,7 +40,9 @@ import           System.Log.Logger
 import           Control.Concurrent
 import           CryptoAPI
 import           DatabaseAPI
+import           System.Entropy (getEntropy)
 import           Data.Hashable
+
 
 encryptTicket :: Pass -> Pass -> Int -> IO Ticket
 encryptTicket serv_key sess timeout = encrypt serv_key $ sess ++ "\nTicket Valid For:" ++ (show timeout)
@@ -53,20 +55,18 @@ encrypToken ticket session server timeout pass  = do
   return $ Token ticket sess serv to
 
 getNewSession:: String -> IO String
-getNewSession inp = do
-  session <- show <$> hash <$> (++) inp <$> show <$> getCurrentTime 
-  return session
+getNewSession inp = DL.take 16 <$> show <$> getEntropy 30 >>= return
 
 buildNewToken :: Key -> Pass -> Key -> Handler Token
 buildNewToken user passw server = do
   liftIO $ warnLog $ "Building new token.."
-  sess <- liftIO $ getNewSession (user++server)
+  sess <- liftIO $ getNewSession (user ++ server)
   (server_key :: (Maybe Pass)) <-liftIO $ getPassw server serversDB
   liftIO $ print server_key
   case server_key of
     Nothing -> throwError custom404Err
     (Just k) -> do
-                let timeout = 1000*1000*1000*60*60
+                let timeout = 3*60*1000
                 liftIO $ forkIO $ addSession sess sess (show timeout)
                 tick <- liftIO $ encryptTicket k sess timeout
                 liftIO $ (encrypToken tick sess server timeout passw) >>= return
@@ -76,12 +76,14 @@ server = login :<|> logOut :<|> getTicket :<|> registerUser :<|> deleteUser
 -- ie get TGS token
 login :: AuthRequest -> Handler Token
 login (File log mes) =  do
+        liftIO $ warnLog "Log in req"
         let (login, message) = mapTuple unpack (log,mes)
         (rec :: Maybe Pass) <- liftIO $ getPassw login usersDB 
         liftIO $ print rec
         case rec of
           Just tgs_pass -> do
             valid <- liftIO $ decrypt tgs_pass message
+            liftIO $ warnLog login
             liftIO $ warnLog valid
             case (login == valid) of
               True  -> buildNewToken login tgs_pass tgs_id 
@@ -89,6 +91,7 @@ login (File log mes) =  do
           Nothing -> throwError custom403Err
 logOut :: Message -> Handler Message
 logOut (Message ticket) =  do
+        liftIO $ warnLog "Log Out req"
         sess <- liftIO $ getSessionKey tgsKey (unpack ticket)
         case sess of 
           Nothing   -> throwError custom401Err
@@ -97,8 +100,8 @@ logOut (Message ticket) =  do
             resp <- liftIO $ encrypt session "Logged Out"
             return $ Message (pack resp)
 getTicket :: AuthRequest -> Handler Token
-getTicket (File log mes) =  do
-        let (ticket, encr_msg) = mapTuple unpack (log,mes)
+getTicket (File server tick) =  do
+        let (encr_msg, ticket) = mapTuple unpack (server,tick)
         session <- liftIO $ getSessionKey tgsKey ticket
         case session of 
           Nothing   -> throwError custom401Err
@@ -134,18 +137,8 @@ startApp = withLogging $ \ aplogger -> do
   warnLog "Starting security-server."
   deleteAllFromDB serversDB
   insertServers serverLogins serversDB
-  (answ :: [Login]) <- getMultipleFromDB Nothing "key" serversDB 
-  print answ
-  (users :: [Login]) <- getMultipleFromDB Nothing "key" usersDB 
-  print users
-  -- (one::Maybe Login) <- getFromDB tgs_id serversDB
-  -- print one
-  -- (two ::Maybe Pass) <- getPassw tgs_id serversDB
-  -- print two
-  warnLog "Done."
   let settings = setPort 8080 $ setLogger aplogger defaultSettings
   runSettings settings app
-    -- Nothing -> warnLog "Something went wrong." >> startApp
                
 
 app :: Application

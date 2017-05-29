@@ -4,7 +4,6 @@ module Lib
     ( startApp
     , app
     ) where
-
 import           Control.Concurrent           (forkIO)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except   (ExceptT)
@@ -42,18 +41,21 @@ server = listDirs :<|> sendDir:<|> addDir :<|> addDirs :<|> delDir
    where
  listDirs::EncrMessage -> Handler Message
  listDirs (msg, ticket) = do
+  liftIO $ warnLog "got request"
   session <- liftIO $ getSessionKey dirKey ticket
   case session of
     Nothing   -> throwError custom403Err
     Just sess -> do
       decryptMsg <- liftIO $ decryptMessage msg sess            
       liftIO $ warnLog $ "Message Contents: " ++  decryptMsg
-      (dirs::[String])<- liftIO $ listDirectories "" dirDB
-      response <- liftIO $ encryptMessage (Message (pack(DL.intercalate "," dirs))) sess 
+      (dirs::[String])<- liftIO $ listDirectories decryptMsg dirDB
+      let resp = (pack(DL.intercalate "," dirs))
+      liftIO $ print resp
+      response <- liftIO $ encryptMessage (Message resp) sess 
       liftIO $ warnLog "Done."
       return (response)
 
- sendDir :: EncrMessage -> Handler EncrDirMessage
+ sendDir :: EncrMessage -> Handler DirMessage
  sendDir (msg, ticket) = do
         session <- liftIO $ getSessionKey dirKey ticket
         case session of
@@ -65,11 +67,11 @@ server = listDirs :<|> sendDir:<|> addDir :<|> addDirs :<|> delDir
            case record of
             Nothing   -> throwError custom403Err
             Just rec -> do
-             liftIO $ warnLog "Found Records. Encrypting response..."
+             liftIO $ warnLog "Found Record. Encrypting response..."
              response <- liftIO $ cryptDirMessage rec sess (encrypt)
              liftIO $ warnLog "Done."
-             return (response, ticket)
- addDir :: EncrDirMessage -> Handler EncrMessage
+             return response
+ addDir :: EncrDirMessage -> Handler Message
  addDir (msg, ticket) = do
         session <- liftIO $ getSessionKey dirKey ticket
         case session of
@@ -79,8 +81,8 @@ server = listDirs :<|> sendDir:<|> addDir :<|> addDirs :<|> delDir
             liftIO $ print decryptDirMsg
             liftIO $ insertToDB (fileID decryptDirMsg) "fileID" decryptDirMsg dirDB
             response <- liftIO $ encryptMessage (Message "Great Addition.") sess
-            return (response,ticket)
- addDirs :: EncrDirMessage -> Handler EncrMessage
+            return response
+ addDirs :: EncrDirMessage -> Handler Message
  addDirs (msg, ticket) = do
         session <- liftIO $ getSessionKey dirKey ticket
         case session of
@@ -90,8 +92,8 @@ server = listDirs :<|> sendDir:<|> addDir :<|> addDirs :<|> delDir
             liftIO $ print decryptDirMsgs
             liftIO $ insertManyToDB (parseDirs decryptDirMsgs) dirDB
             response <- liftIO $ encryptMessage (Message "Great Additions.") sess
-            return (response,ticket)
- delDir :: EncrMessage -> Handler EncrMessage
+            return response
+ delDir :: EncrMessage -> Handler Message
  delDir (msg, ticket) = do
         session <- liftIO $ getSessionKey dirKey ticket
         case session of
@@ -101,23 +103,22 @@ server = listDirs :<|> sendDir:<|> addDir :<|> addDirs :<|> delDir
            liftIO $ warnLog $ "Message Contents: " ++  decryptMsg
            liftIO $ deleteFromDB decryptMsg "fileID" dirDB
            response <- liftIO $ encryptMessage (Message "Great Deletion.") sess
-           return (response , ticket)
+           return response
 
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
   warnLog "Starting dir-server."
-  deleteAllFromDB dirDB
+  -- deleteAllFromDB dirDB
   insertManyToDB directories dirDB
   (dirs::[String])<- listDirectories "" dirDB
   print dirs
-  (di::[String])<- listDirectories "abc/" dirDB
-  print di
-  (dirs2::[DirMessage])<-getMultipleFromDB Nothing "fileID" dirDB
-  print dirs2
+  -- (di::[String])<- listDirectories "abc/" dirDB
+  -- print di
+  -- (dirs2::[DirMessage])<-getMultipleFromDB Nothing "fileID" dirDB
+  -- print dirs2
 
-  let settings = setPort 8081 $ setLogger aplogger defaultSettings
+  let settings = setPort 8090 $ setLogger aplogger defaultSettings
   runSettings settings app
-
 
 
 app :: Application
@@ -129,14 +130,6 @@ api = Proxy
 dirKey = "dir_password"  :: Pass
 dirDB = "FILE_TO_SERVER" :: Text
 
-cryptDirMessage:: DirMessage -> Pass -> (Pass -> String -> IO String)-> IO DirMessage
-cryptDirMessage (DirMessage fileID sID sIP sPort sPath) pass (funct) = do
-  fid <- funct pass fileID
-  sid <- funct pass sID
-  sip <- funct pass sIP 
-  spo <- funct pass sPort
-  spa <- funct pass sPath
-  return (DirMessage fid sid sip spo spa)
 
 parseDirs:: DirMessage -> [DirMessage]
 parseDirs (DirMessage fileID sID sIP sPort sPath) = DL.zipWith5 (\a b c d e -> (DirMessage a b c d e)) fileIDs sIDs sIPs sPorts sPaths
@@ -150,11 +143,4 @@ directories = [(DirMessage "asd.com" "FS1" "localhost" "8085" "1")
               ,(DirMessage "abc/" "FS1" "localhost" "8085" "")
               ,(DirMessage "abc/a.txt" "FS1" "localhost" "8085" "2")
               ,(DirMessage "asd.com" "FS2" "localhost" "8086" "1")
-              ,(DirMessage "abc/" "FS2" "localhost" "8086" "")
-              ,(DirMessage "" "FS1" "localhost" "8086" "")
-              ,(DirMessage "" "FS2" "localhost" "8087" "")
-              ,(DirMessage "" "FS3" "localhost" "8086" "")
-              ,(DirMessage "" "DIR" "localhost" "8081" "")
-              ,(DirMessage "" "LOC" "localhost" "8082" "")
-              ,(DirMessage "" "TRN" "localhost" "8083" "")
-              ,(DirMessage "" "SEC" "localhost" "8080" "")]
+              ,(DirMessage "abc/" "FS2" "localhost" "8086" "")]
