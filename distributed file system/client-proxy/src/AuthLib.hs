@@ -24,7 +24,7 @@ import DatabaseAPI
 import Data.Proxy
 import GHC.Generics
 import Network.HTTP.Client hiding (Proxy)
-
+import Control.Exception
 import System.Directory 
 import Data.List.Split        as D           
 import System.IO.Error
@@ -58,14 +58,12 @@ deleteUserRequest usr ticket = deleteUser (File (pack usr) (pack ticket)) >>= re
 doLogin:: String -> Int -> IO (Maybe (Key,Token))
 doLogin ip port = do
   (username,password) <- userDetailsIn False
-  print [username,password]
   encrPass <- encrypt password username  
   encrToken <- makeRequest (loginRequest username encrPass) ip port
   case encrToken of
-    Left err -> putStrLn ( "Error: " ++ show err) >> return Nothing
+    Left err -> warnLog ( "Error: " ++ show err) >> return Nothing
     Right (k) -> do
         tgsToken@(Token ticket sess serv to) <- decrypToken k password 
-        -- print tgsToken
         warnLog $ "Welcome " ++ username
         return $ Just (username, tgsToken)
 
@@ -73,7 +71,7 @@ doLogout :: (Pass,Ticket,String,Int) -> IO ()
 doLogout (session,ticket,ip,port) = do
     msg <- makeRequest (logoutRequest ticket) ip port
     case msg of
-      Left err -> putStrLn $ "Error: " ++ show err
+      Left err -> warnLog $ "Error: " ++ show err
       Right (Message encrM) -> do
         decrM <- decrypt session (unpack encrM)
         print decrM
@@ -82,7 +80,7 @@ doRegister ip port = do
   (user,pass) <- userDetailsIn True
   (msg) <- makeRequest (registerRequest user pass) ip port
   case msg of
-    Left err -> putStrLn $ "Error: " ++ show err
+    Left err -> warnLog $ "Error: " ++ show err
     Right (Message m) -> print m
 
 
@@ -92,7 +90,7 @@ doUnregister username (session,ticket,ip,port) = do
    encrReq <- encrypt session username
    encrResp <- makeRequest (deleteUserRequest encrReq ticket) ip port
    case encrResp of
-    Left err -> putStrLn $ "Error: " ++ show err
+    Left err -> warnLog $ "Error: " ++ show err
     Right (Message m) -> do
       decrResp <- decrypt session (unpack m)
       print m
@@ -102,11 +100,18 @@ userDetailsIn isNew = do
   putStrLn  "Username:"
   username <- getLine
   putStrLn "Password:"
-  password <- getLine
+  password <- withEcho False getLine
+  putChar '\n'
   case isNew of
     True -> do
       putStrLn "Re-enter password:"
-      pass2 <- getLine
+      pass2 <- withEcho False getLine
+      putChar '\n'
       if password==pass2 then return (username, password)
         else print "Incorrectly re-entered password.Try again" >> userDetailsIn isNew
     False -> return (username, password)
+
+withEcho :: Bool -> IO a -> IO a
+withEcho echo action = do
+  old <- hGetEcho stdin
+  bracket_ (hSetEcho stdin echo) (hSetEcho stdin old) action

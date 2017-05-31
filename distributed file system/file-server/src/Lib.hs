@@ -73,7 +73,8 @@ server = downloadFile
            let (path,cont) =  (unpack p, read (unpack fc) :: Maybe UTCTime) 
            liftIO $ warnLog $ "Message Path: "     ++  path  
            liftIO $ warnLog $ "Message Contents: " ++  (show cont)
-           let fp = fp ++ path
+           curDir <- liftIO getCurrentDirectory
+           let fp = curDir ++ "/" ++ path
            liftIO $ print fp
            exists <- liftIO (doesFileExist fp)
            isMod<- case cont of
@@ -99,9 +100,10 @@ server = downloadFile
           Just sess -> do
            (File p fc) <- liftIO $ cryptFile msg sess decrypt
            let path =  unpack p
-           -- liftIO $ warnLog $ "Message Path: "     ++  path  
-           -- liftIO $ warnLog $ "Message Contents: " ++  (show fc)
-           let fp = homeDir ++ path
+           liftIO $ warnLog $ "Message Path: "     ++  path  
+           liftIO $ warnLog $ "Message Contents: " ++  (show fc)
+           curDir <- liftIO getCurrentDirectory
+           let fp = curDir ++ "/" ++ path
            liftIO $ warnLog $ "Writing to File: "     ++  path
            liftIO $ writeFile fp (fc)
            encrFile <- liftIO $ encryptMessage (Message (pack "200 Great Addition")) sess
@@ -112,8 +114,10 @@ server = downloadFile
         case session of
           Nothing   -> throwError custom403Err
           Just sess -> do
-           fp <- liftIO $ decryptMessage msg sess            
-           liftIO $ warnLog $ "Message Contents: " ++  fp
+           path <- liftIO $ decryptMessage msg sess 
+           liftIO $ warnLog $ "Message Contents: " ++  path
+           curDir <- liftIO getCurrentDirectory
+           let fp = curDir ++ "/" ++ path
            exists <- liftIO (doesFileExist fp)
            case exists of
               True -> do 
@@ -139,5 +143,5 @@ api = Proxy
 fsKey = "fs1_password" ::String
 fs2Key = "fs2_password" ::String
 fs3Key = "fs3_password" ::String
-homeDir = "./files"
+homeDir = "./files/"
 

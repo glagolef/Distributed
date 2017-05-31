@@ -30,11 +30,12 @@ import Data.List.Split        as D
 import System.IO.Error
 import Control.Exception
 import Data.Time.Clock
+import qualified Data.Text.IO as T
+import qualified Data.Text as T
 import System.IO
 import Web.HttpApiData
 import Control.Monad
 import Data.Text (pack, unpack) 
-import qualified Data.Text.IO as T 
 import Options.Applicative
 import System.Environment
 import qualified Data.ByteString.Char8    as C
@@ -58,14 +59,15 @@ entryMenu = do
     case loggedIn of
       Just (username,tgsToken@(Token ticket session _ timeout)) -> do
         sessions <- M.newCache $ Just $ TimeSpec{ sec= ( 60*60*(read timeout)),nsec=0}
-        M.insert sessions "TGS" (session,ticket,authIP,authPort)
-        printHelp 
+        M.insert sessions "TGS" (session,ticket,authIP,authPort) 
+        putStrLn "ls"
         doLS sessions ""
+        printHelp
         loggedInMenu username tgsToken sessions
       Nothing -> entryMenu
   "2"-> doRegister authIP authPort >> entryMenu
   "3"-> quitMessage
-  _ -> print "No such option" >> entryMenu
+  _ -> putStrLn "No such option" >> entryMenu
 
 loggedInMenu:: Key -> Token -> Sessions -> IO ()
 loggedInMenu username tgsToken@(Token ticket session _ _) sessions = do
@@ -76,7 +78,7 @@ loggedInMenu username tgsToken@(Token ticket session _ _) sessions = do
    "logout" -> doLogout (session,ticket,authIP,authPort) >> entryMenu
    "unregister" -> doUnregister username (session,ticket,authIP,authPort) >> entryMenu
    "quit" -> doLogout (session,ticket,authIP,authPort) >> quitMessage
-   "ls" -> doLS sessions ""
+   "ls" -> doLS sessions "" >>goBack
    _   -> do
      let wds = words cmd
      if (fileCmdOK (wds)) then do 
@@ -88,69 +90,54 @@ loggedInMenu username tgsToken@(Token ticket session _ _) sessions = do
 
 makeQuery:: [String] -> Sessions ->(IO ())-> IO ()
 makeQuery (x:xs) cache goBack = do
-  -- curDir <-getCurrentDirectory
-  -- let (div,fn) = case isInfixOf "\\" curDir of True  -> ("\\", (replace "/" "\\" (head xs)))
-  --                                              False -> ("/", (replace "\\" "/" (head xs)))
-  let fn = head xs
-      fp =  homeDir ++ fn
-  print fp
-  -- let newfp = getFilesDir fp 
-  print fn
+  let fp = head xs
   exists <- doesFileExist fp
   modTime <- getModTime fp exists
-  print exists
-  print modTime
-  (DirMessage fileID sID sIP sPort sPath) <- doGetDir fn cache
+
+  (DirMessage fileID sID sIP sPort sPath) <- doGetDir fp cache
   when (sPort /= "") $ do
     (sess,tick,_,_) <- getSess sID cache (sIP,(read sPort::Int))
     when ((sess /= "")) $ case x of
       "open"   -> do 
         let mode = getOpenMode (last xs)
-        getLock <- if (elem mode [ReadWriteMode,WriteMode,AppendMode]) then doGetLock fn cache else return True
+        getLock <- if (elem mode [ReadWriteMode,WriteMode,AppendMode]) then doGetLock fp cache else return True
         case getLock of
           False -> putStrLn "Lock was not obtained." >> goBack
           True -> do
-            print "here"
             gotFile <- getFile modTime fp sPath (sess,tick,sIP,(read sPort))
             when gotFile $ do
               mod <- getModificationTime fp
-              handle <- openFile fp mode
-              openedFileMenu mode fp handle
-              uploadIfModified fp mod sPath (sess,tick,sIP,(read sPort)) cache
-      "delete" -> deleteFile fp fn (sess,tick,sIP,(read sPort)) cache
+              -- handle <- openFile fp mode
+              opennedHelp
+              openedFileMenu fp mode
+              when (elem mode [ReadWriteMode,WriteMode,AppendMode]) $ uploadIfModified fp sPath mod (sess,tick,sIP,(read sPort)) cache
+      "delete" -> deleteFile fp (sess,tick,sIP,(read sPort)) cache
   if (fileID /= "quit") then goBack else entryMenu
 
-openedFileMenu:: IOMode -> FilePath -> Handle -> IO ()
-openedFileMenu mode fp handle = do
-  nextCmd <-words <$> getLine
+openedFileMenu::  FilePath-> IOMode -> IO ()
+openedFileMenu fp mode = do
+  nextCmd <-T.words <$> T.getLine
   case (mode, nextCmd) of
-    (ReadMode, ["read"]) -> hGetContents handle >>= print
-    (ReadWriteMode, ["read"]) -> hGetContents handle >>= print
-    (WriteMode, ("write":contents)) -> hPutStr handle (unwords contents) 
-    (ReadWriteMode, ("write":contents)) -> hPutStr handle (unwords contents) 
-    (AppendMode, ("append":contents)) -> appendFile fp (unwords contents) 
-    (ReadMode, ["close"]) -> hClose handle
-    (_, ["close"]) -> hClose handle
-    (_, ["help"]) -> opennedHelp 
+    (ReadMode, ["read"]) -> T.readFile fp >>= print
+    (ReadWriteMode, ["read"]) -> T.readFile fp >>= print
+    (WriteMode, ("write":contents)) -> T.writeFile fp  (T.unwords contents) 
+    (ReadWriteMode, ("write":contents)) -> T.writeFile fp (T.unwords contents) 
+    (AppendMode, ("append":contents)) -> T.appendFile fp (T.unwords contents) 
+    (_, ["help"]) -> opennedHelp
+    (_, ["close"]) -> print "Closing.."
     (_, _) -> errorCmd  
-  when (nextCmd /= ["close"]) $ openedFileMenu mode fp handle
+  when (nextCmd /= ["close"]) $ openedFileMenu fp mode
 
 --MENU MESSAGES
-errorCmd = print "No Such Command"
+errorCmd = print "No Such Command, or command not allowed"
 quitMessage = print "Bye."
 
 opennedHelp :: IO ()
-opennedHelp = putStrLn $ " read\n write contents\n append contents\n close"
-                   ++ "\n5. quit \n help"
+opennedHelp = putStrLn $ "Allowed Commands:\n read\n write contents\n append contents\n close"
+                   ++ "\n quit \n help"
 printHelp:: IO ()
-printHelp = putStrLn $ " logout\n unregister\n ls path/to/dir \n open path/to/file -r/-w/-a \n quit \n help "
+printHelp = putStrLn $ "Allowed Commands:\n logout\n unregister\n ls path/to/dir \n open path/to/file -r/-w/-a/-rw \n quit \n help "
 
-
--- getFilesDir:: FilePath -> String -> FilePath
--- getFilesDir dir div = dir \\ (result ++ div ++ "files" ++ div)
---   where wds = words $ replace div " " dir
---         cut = takeWhile (/="files") wds
---         result = replace " " div $ unwords cut
 
 getModTime :: FilePath -> Bool -> IO (Maybe UTCTime)
 getModTime _ False = return Nothing
@@ -169,7 +156,7 @@ doGetLock:: FilePath -> Sessions -> IO (Bool)
 doGetLock fp cache = do
   (sess,tick,ip,port) <- getSess "LOC" cache (locIP,locPort) 
   case sess of
-      "" -> putStrLn "Session expired." >> return False
+      "" -> warnLog "Session expired." >> return False
       _ -> do
        encResp <- makeRequest (getLockRequest fp sess tick) ip port
        case encResp of
@@ -193,11 +180,11 @@ doReleaseLock:: FilePath -> Sessions-> IO ()
 doReleaseLock fp cache = do
   s <-isValidSess fp 
   case s of 
-    False -> print "Lock expired."
+    False -> warnLog "Lock expired."
     True -> do 
      (sess,tick,ip,port) <- getSess "LOC" cache (locIP,locPort) 
      case sess of
-      "" -> putStrLn "Session expired." >> quitMessage >> entryMenu
+      "" -> warnLog "Session expired." >> quitMessage >> entryMenu
       _ -> do
        encResp <- makeRequest (releaseLockRequest fp sess tick) ip port
        case encResp of
@@ -210,86 +197,88 @@ doReleaseLock fp cache = do
           decryptMessage msg sess >>= print
 
 downloadRequest:: Maybe UTCTime -> FilePath -> Pass -> Ticket -> ClientM Message
-downloadRequest modTime newfp sess ticket = do
-    let req = File (pack newfp) (pack (show modTime))
+downloadRequest modTime server_fp sess ticket = do
+    let req = File (pack server_fp) (pack (show modTime))
     encReq <- liftIO $ cryptFile req sess encrypt
     download (encReq, ticket) >>= return
 
 getFile::Maybe UTCTime -> FilePath -> FilePath -> (Pass,Ticket,String,Int)-> IO Bool
-getFile modTime fp newfp  (session,ticket,ip,port) = do
-  encResp <- makeRequest (downloadRequest modTime newfp session ticket) ip port
+getFile modTime fp server_fp (session,ticket,ip,port) = do
+  encResp <- makeRequest (downloadRequest modTime server_fp session ticket) ip port
   case encResp of
     Left  err -> do
       warnLog ("Error: " ++ show err)
       again <- tryAgain
-      if again then getFile modTime fp newfp (session,ticket,ip,port)
+      if again then getFile modTime fp server_fp (session,ticket,ip,port)
         else return False
     Right (msg) -> do
         contents <- decryptMessage msg session
         if (contents == "304 Not Modified") then return True
           else do
-                  createDirectoryIfMissing True $ fp
-                  writeFile fp contents
+                  if (elem '\\' fp) then 
+                    createDirectoryIfMissing True $ reverse $ dropWhile (\x->x/='\\') $ reverse fp --Windows case
+                    else createDirectoryIfMissing True $ reverse $ dropWhile (\x->x/='/') $ reverse fp -- Linux/Mac case
+                  T.writeFile fp (pack contents)
                   return True
 
-uploadRequest:: FilePath -> String ->  Pass ->  Ticket -> ClientM Message
-uploadRequest fp fn sess tick =  do
+uploadRequest:: FilePath -> FilePath ->  Pass ->  Ticket -> ClientM Message
+uploadRequest fp server_fp sess tick =  do
     cont <- liftIO $ T.readFile fp
-    let req = File (pack fn) cont
+    let req = File (pack server_fp) cont
     encReq <- liftIO $ cryptFile req sess encrypt
     upload (encReq, tick) >>= return 
 
 uploadFile:: FilePath -> FilePath -> (Pass,Ticket,String,Int) -> IO () 
-uploadFile fp fn (sess,tick,ip,port) = do
-  encResp <- makeRequest (uploadRequest fp fn sess tick) ip port
+uploadFile fp server_fp (sess,tick,ip,port) = do
+  encResp <- makeRequest (uploadRequest fp server_fp sess tick) ip port
   case encResp of
     Left err -> do
       warnLog $ "Error: " ++ show err 
       again <- tryAgain
-      when again $ uploadFile fp fn (sess,tick,ip,port)
+      when again $ uploadFile fp server_fp (sess,tick,ip,port)
     Right msg -> do
       contents <- decryptMessage msg sess
       print $ contents
-      print $ "File uploaded: " ++ fn
+      warnLog $ "File uploaded: " ++ fp
 
 
 deleteRequest:: FilePath -> Pass -> Ticket -> ClientM Message
-deleteRequest fn sess ticket = do
-    let req = Message (pack fn)
+deleteRequest fp sess ticket = do
+    let req = Message (pack fp)
     encReq <- liftIO $ encryptMessage req sess
     removeF (encReq, ticket) >>= return
 
 
-deleteFile:: FilePath -> FilePath -> (Pass,Ticket,String,Int) -> Sessions-> IO ()
-deleteFile fp fn (sess,ticket,ip,port) cache = do
+deleteFile:: FilePath -> (Pass,Ticket,String,Int) -> Sessions-> IO ()
+deleteFile fp (sess,ticket,ip,port) cache = do
   getLock <-  doGetLock fp cache
   case getLock of
-      False -> putStrLn "Lock was not obtained."
+      False -> warnLog "Lock was not obtained."
       True -> do
         exists <- doesFileExist fp
         when exists $ do 
-              print ("Deleting "++ fn )
+              warnLog ("Deleting "++ fp )
               removeFile fp
-        encResp <- makeRequest (deleteRequest fn sess ticket) ip port
+        encResp <- makeRequest (deleteRequest fp sess ticket) ip port
         case encResp of
           Left err -> do
             warnLog $ "Error: " ++ show err
             again <- tryAgain
-            if again then deleteFile fp fn (sess,ticket,ip,port) cache
+            if again then deleteFile fp (sess,ticket,ip,port) cache
               else return ()
           Right msg -> do
             contents <- decryptMessage msg sess
             print $ contents
-            print $ "File deleted: " ++ fn
+            warnLog $ "File deleted: " ++ fp
 
-uploadIfModified:: FilePath -> UTCTime -> FilePath -> (Pass,Ticket,String,Int) -> Sessions -> IO ()
-uploadIfModified fp mod fn conn cache = do
- modified <- (==) mod <$> getModificationTime fp
+uploadIfModified:: FilePath -> FilePath -> UTCTime -> (Pass,Ticket,String,Int) -> Sessions -> IO ()
+uploadIfModified fp server_fp mod conn cache = do
+ modified <- (/=) mod <$> getModificationTime fp
  if modified then do
-  print $ fn ++ " was modified. Uploading..."
-  uploadFile fp fn conn
+  warnLog $ fp ++ " was modified. Uploading..."
+  uploadFile fp server_fp conn
   doReleaseLock fp cache
-  else print $ fn ++ " was not modified."
+  else warnLog $ fp ++ " was not modified."
 
 getOpenMode:: String -> IOMode
 getOpenMode "-r"  = ReadMode
@@ -299,7 +288,7 @@ getOpenMode "-rw" = ReadWriteMode
 
 
 fileCmdOK::[String]->Bool
-fileCmdOK ["open",_, mode] = elem mode ["-r","-a","-w"] 
+fileCmdOK ["open",_, mode] = elem mode ["-r","-a","-w", "-rw"] 
 fileCmdOK ["delete", _]    = True
 fileCmdOK ["close"]    =  True
 fileCmdOK ["ls",_]       =  True
@@ -323,10 +312,9 @@ doGetTicket server (session,ticket,ip,port) = do
   encrReq <- encrypt session server
   encrToken <- makeRequest (getTicketRequest encrReq ticket) ip port
   case encrToken of
-    Left err -> putStrLn ("Error: " ++ show err) >> return Nothing
+    Left err -> warnLog ("Error: " ++ show err) >> return Nothing
     Right (t) -> do
         serverToken <- decrypToken t session 
-        print serverToken
         return $ Just serverToken
 
 --DIR FUNCTIONS
@@ -337,12 +325,12 @@ doGetDir:: FilePath -> Sessions -> IO DirMessage
 doGetDir dir cache = do
   (dirSess,dirTick,dir_ip,dir_port) <- getSess "DIR" cache (dirIP,dirPort) 
   case dirSess of
-    "" -> putStrLn "Session expired.">>return (DirMessage "quit" "" "" "" "")
+    "" -> warnLog "Session expired.">>return (DirMessage "quit" "" "" "" "")
     _ -> do
       encrDir <- encrypt dirSess dir
       msg <- makeRequest (getDirRequest encrDir dirTick) dir_ip dir_port
       case msg of
-        Left err -> putStrLn ("Error: " ++ show err) >> return (DirMessage "" "" "" "" "")
+        Left err -> warnLog ("Error: " ++ show err) >> return (DirMessage "" "" "" "" "")
         Right (encrM) -> do
           decrM <- cryptDirMessage encrM dirSess (decrypt)
           return decrM
@@ -355,121 +343,38 @@ doLS cache dir = do
   M.purgeExpired cache
   (sess,tick,dir_ip,dir_port) <- getSess "DIR" cache (dirIP,dirPort)
   case sess of
-    "" -> putStrLn "Session expired.">>quitMessage>>entryMenu
+    "" -> warnLog "Session expired.">>quitMessage>>entryMenu
     _ -> do
       encrDir <- encrypt sess dir  
       msg <- makeRequest (listDirsRequest encrDir tick) dir_ip dir_port
       case msg of
-        Left err -> putStrLn $ "Error: " ++ show err
+        Left err -> warnLog $ "Error: " ++ show err
         Right (encrM) -> do
           decrM <- decryptMessage encrM sess
           print (D.splitOn "," decrM)
 
 getSess:: Key -> Sessions -> (String,Int) -> IO (Pass,Ticket,String,Int)
 getSess server cache (i,p) = do
-  putStrLn "getting session"
+  warnLog "getting session"
   getSession <- M.lookup cache server
   ses <- case getSession of
     Just s -> return s
     Nothing -> do
-      putStrLn "session not in cache. getting tgs token"
+      warnLog "session not in cache. getting tgs token"
       tgs <- M.lookup cache "TGS"
       case tgs of
         Nothing -> return ("","","",0) 
         Just (tgs_session,tgs_ticket,tgs_ip,tgs_port) -> do
-          putStrLn "tgs token found"
+          warnLog "tgs token found"
           token <- doGetTicket server (tgs_session,tgs_ticket,tgs_ip,tgs_port)
           case token of
             Just (Token tick sess server_id timeout) -> do
               let theCache = M.setDefaultExpiration cache $ Just $ TimeSpec{ sec= ( 60*60*(read timeout)),nsec=0}
               M.insert cache server_id (sess,tick,i,p)
               return (sess,tick,i,p)
-            Nothing -> putStrLn "Something went wrong.">>return ("","","",0)
+            Nothing -> warnLog "Something went wrong.">>return ("","","",0)
   return ses
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
--- let's put all the hard work in a helper...
--- doCall f h p = reportExceptionOr (putStrLn "Error") (runClientM f =<< env h p)
-
--- -- which makes the actual rest calls trivial...(notice the currying)
-
--- doLoadEnvVars :: Maybe String -> Maybe String -> Maybe String -> IO ()
--- doLoadEnvVars s = doCall $ loadEnvVars s
-
--- doGetREADME :: Maybe String -> Maybe String -> IO ()
--- doGetREADME  = doCall getREADME
-
--- doStoreMessage :: String -> String -> Maybe String -> Maybe String -> IO ()
--- doStoreMessage n m  = doCall $ storeMessage $ Message n m
-
--- doSearchMessage :: String -> Maybe String -> Maybe String -> IO ()
--- doSearchMessage s  = doCall $ searchMessage $ Just s
-
--- doPerformRestCall :: Maybe String -> Maybe String -> Maybe String -> IO ()
--- doPerformRestCall s  =  doCall $ performRestCall s
-
-
--- | The options handling
-
--- First we invoke the options on the entry point.
--- someFunc :: IO ()
--- someFunc = do
---   join $ execParser =<< opts
-
--- | Defined in the applicative style, opts provides a declaration of the entire command line
---   parser structure. To add a new command just follow the example of the existing commands. A
---   new 'doCall' function should be defined for your new command line option, with a type matching the
---   ordering of the application of arguments in the <$> arg1 <*> arg2 .. <*> argN style below.
--- opts :: IO (ParserInfo (IO ()))
--- opts = do
---   progName <- getProgName
-
---   return $ info (   helper
---                 <*> subparser
---                        (  command "login"
---                                   (withInfo ( doLogin
---                                             <$> serverIpOption
---                                             <*> serverPortOption) "Load an environment variable on the remote server." )))
-             --   (  fullDesc
-             -- <> progDesc (progName ++ " is a simple test client for the use-haskell service." ++
-             --              " Try " ++ whiteCode ++ progName ++ " --help " ++ resetCode ++ " for more information. To " ++
-             --              " see the details of any command, " ++  "try " ++ whiteCode ++ progName ++ " COMMAND --help" ++
-             --              resetCode ++ ". The application supports bash completion. To enable, " ++
-             --              "ensure you have bash-completion installed and enabled (see your OS for details), the " ++
-             --              whiteCode ++ progName ++ resetCode ++
-             --              " application in your PATH, and place the following in your ~/.bash_profile : " ++ whiteCode ++
-             --              "source < (" ++ progName ++ " --bash-completion-script `which " ++ progName ++ "`)" ++
-             --              resetCode )
-             -- <> header  (redCode ++ "Git revision : " ++ gitRev ++ ", branch: " ++ gitBranch ++ resetCode))
 
 -- helpers to simplify the creation of command line options
 withInfo :: Parser a -> String -> ParserInfo a
@@ -488,12 +393,6 @@ serverPortOption = optional $ strOption (  long "port"
                                         <> metavar "PORT_NUMBER"
                                         <> help "The port number of the use-haskell service.")
 
-
-
--- | function to build the client environment for performing a servant client rest call
--- It uses the host name and port parameters if Just x, or else uses envrionment variables
--- This uses an applicative programming style that is very condensed, and easy to understand when you get used to it,
--- compared to the alternative sequence of calls and subsequent record construction.
 
 env :: Maybe String -> Maybe String -> IO ClientEnv
 env host port = ClientEnv <$> newManager defaultManagerSettings
@@ -515,28 +414,13 @@ env host port = ClientEnv <$> newManager defaultManagerSettings
    usehaskellPort :: IO String
    usehaskellPort = devEnv "USE_HASKELL_PORT" id "8080" True
 
-
-   -- | Helper function to simplify the setting of environment variables
-   -- function that looks up environment variable and returns the result of running funtion fn over it
-   -- or if the environment variable does not exist, returns the value def. The function will optionally log a
-   -- warning based on Boolean tag
-
-   -- note that this is a good example of a commonly required function that could usefully be put in a shared library
-   -- but I'm not going to do that for now.
-
    devEnv :: Show a
           => String        -- Environment Variable name
           -> (String -> a)  -- function to process variable string (set as 'id' if not needed)
           -> a             -- default value to use if environment variable is not set
           -> Bool          -- True if we should warn if environment variable is not set
           -> IO a
-   devEnv env fn def warn = lookupEnv env >>= \ result ->
+   devEnv env fp def warn = lookupEnv env >>= \ result ->
      case result of
-         Just s  -> return $ fn s
-         Nothing -> warn' warn env def
-
-    where warn' :: Show b => Bool -> String -> b -> IO b
-          warn' wn e s =  do
-            when wn $ putStrLn $ "Environment variable: " ++ e ++
-                                    " is not set. Defaulting to " ++ (show s)
-            return s
+         Just s  -> return $ fp s
+         Nothing -> return def

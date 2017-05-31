@@ -28,7 +28,6 @@ library
                      , pretty
                      , Cabal
                      , ansi-terminal
-                     , bson-generic
                      , aeson
                      , template-haskell
                      , text

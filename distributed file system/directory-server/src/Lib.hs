@@ -8,6 +8,7 @@ import           Control.Concurrent           (forkIO)
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Except   (ExceptT)
 import           Control.Monad.Trans.Resource
+import           Control.Monad                (when)
 import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.Bson
@@ -108,15 +109,8 @@ server = listDirs :<|> sendDir:<|> addDir :<|> addDirs :<|> delDir
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
   warnLog "Starting dir-server."
-  -- deleteAllFromDB dirDB
-  insertManyToDB directories dirDB
   (dirs::[String])<- listDirectories "" dirDB
-  print dirs
-  -- (di::[String])<- listDirectories "abc/" dirDB
-  -- print di
-  -- (dirs2::[DirMessage])<-getMultipleFromDB Nothing "fileID" dirDB
-  -- print dirs2
-
+  when (dirs == []) $ insertManyToDB directories dirDB
   let settings = setPort 8090 $ setLogger aplogger defaultSettings
   runSettings settings app
 

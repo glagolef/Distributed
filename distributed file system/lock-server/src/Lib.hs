@@ -105,15 +105,16 @@ server = getLock
             return response
 
 useLock fp = do
-  suspend $ mDelay 60
+  suspend $ mDelay 30
   liftIO $ insertToDB fp "key" (Login fp "free") db
 
 startApp :: IO ()
 startApp = withLogging $ \ aplogger -> do
   warnLog "Starting lock-server."
+  deleteAllFromDB db
+  -- (locks :: [Login]) <- liftIO $ getMultipleFromDB Nothing "key" db 
+  -- when (locks == []) $ 
   insertManyToDB directories db
-  (locks :: [Login]) <- liftIO $ getMultipleFromDB Nothing "key" db 
-  print locks
   let settings = setPort 8082 $ setLogger aplogger defaultSettings
   runSettings settings app 
 

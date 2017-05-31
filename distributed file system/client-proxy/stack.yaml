@@ -1,15 +1,14 @@
 extra-deps:
 - attoparsec-iso8601-1.0.0.0
 - compact-string-fix-0.3.2
+- crypto-simple-0.1.0.0
+- git-embed-0.1.0
 - http-api-data-0.3.7
 - natural-transformation-0.4
 - servant-0.10
 - servant-client-0.10
 - servant-server-0.10
-- crypto-simple-0.1.0.0
-- git-embed-0.1.0
 - suspend-0.2.0.0
-
 resolver: lts-7.9
 flags: {}
 extra-package-dbs: []
@@ -18,6 +17,6 @@ packages:
 - location:
     git: https://github.com/Palmik/bson-generic.git
     commit: e078def65d0dee1ea7e3205f445e47d5937851f3
-    # git: https://github.com/glagolef/Distributed/tree/master/distributed%20file%20system/distributed-api
-    # commit:  76625d5
-- C:/Users/HOME/Desktop/project/distributed/distributed file system/distributed-api
+    # git: https://github.com/glagolef/distributed-api
+    # commit: 6ee6abe
+- ../distributed-api

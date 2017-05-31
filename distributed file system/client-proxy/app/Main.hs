@@ -12,6 +12,7 @@ import qualified Data.Cache as M
 
 main :: IO ()
 main = do
+	  createDirectoryIfMissing True $ "./files"
 	  setCurrentDirectory "./files"
 	  entryMenu
 
